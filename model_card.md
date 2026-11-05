@@ -1,105 +1,86 @@
-# Model Card: Music Recommender Simulation
+# Model Card: VibeFinder 2.0
 
-## 1. Model Name
+*Extends VibeFinder 1.0 (Module 3 Music Recommender Simulation). The original model card is preserved in this repo's git history, at commit `12213e3`.*
 
-**VibeFinder 1.0**
+## 1. Model overview
 
-I called it VibeFinder because the whole point of the system is to match a listener's "vibe" — a mix of genre, mood, and a few numeric feelings — against songs in a small catalog.
+| | |
+|---|---|
+| **Name** | VibeFinder 2.0 |
+| **Type** | Retrieval-augmented, content-based recommender wrapped in a self-checking agent loop |
+| **Input** | A free-text request in English (≤ 300 characters) |
+| **Output** | Top-k songs with explanations, a confidence score (0–1), a `needs_review` flag with a clarifying message, and a step-by-step trace |
+| **AI features** | RAG (context-card retrieval that changes scoring targets); agentic plan → act → verify → revise loop; confidence scoring; guardrails; optional Gemini explanations with validation and fallback |
+| **Data** | `data/songs.csv` (18 fictional tracks, unchanged from Module 3); `data/knowledge/` (13 hand-written context cards) |
 
----
+## 2. Intended use and non-intended use
 
-## 2. Goal / Task
+**Intended:** a portfolio and classroom demonstration of how to make an AI recommender *grounded* (it retrieves before deciding), *self-checking* (it verifies and revises its own answer) and *honest* (it flags low confidence instead of hiding it).
 
-I built a simple recommender that takes a listener's stated preferences (favorite genre, favorite mood, and target levels for energy, danceability, and acousticness) and returns the five songs from my catalog that best fit those preferences, along with a short explanation for each pick.
+**Not intended for:** real listeners (18 songs is a toy catalog), any profiling of users, or any setting where a recommendation is treated as authoritative. Confidence measures how well songs fit the *stated* request, not whether a person will actually like them.
 
-I wasn't trying to predict what someone would actually listen to in the real world. I was trying to simulate how a very basic recommender *reasons* about taste, so I could see where that kind of reasoning breaks down.
+## 3. Testing results
 
----
+| Evaluation | Result |
+|---|---|
+| Evaluation harness (`python -m src.evaluate`) | **19/19 checks pass**: 11 behaviour, 7 robustness, 1 consistency |
+| Unit and behaviour tests (`python -m pytest`) | **53/53 pass** |
+| Retrieval lift on situation-style requests | baseline without retrieval **2/7** correct top result → with RAG **7/7** |
+| Confidence calibration | answers not flagged average **0.97**; flagged answers average **0.53** |
+| Consistency | identical output across 5 repeated runs, and across 3 processes with different `PYTHONHASHSEED` |
 
-## 3. Data Used
+Human evaluation of untuned inputs (probing done after the harness first passed):
 
-I used the `data/songs.csv` file that came with the starter project. It has **18 songs** and the following fields per song: id, title, artist, genre, mood, energy, tempo, valence, danceability, and acousticness. The numeric fields are all between 0 and 1 (except tempo, which is in BPM).
+| Input | Criterion | Before fixes | After |
+|---|---|---|---|
+| "relaxing music but not jazz" | no jazz in top 3 | **Fail**: jazz #1 at confidence 1.00 | Pass |
+| "I hate rock, give me something to work out to" | workout songs, no rock | **Fail**: parsed genre=rock, retrieved *coding* card | Pass |
+| "something to dance to at my cousin's wedding" | upbeat danceable pop | Pass | Pass |
+| "sad songs for a road trip" | sad *and* driving | **Fail**: sadness dropped (the night-drive card dominates) | Still fails (known limitation) |
+| "high energy lofi" | flag the conflict | Pass: relaxed + flagged | Pass |
+| "música para estudiar" | handle gracefully | Pass: refused, no crash | Pass (but not *useful*) |
+| "I'm bored" | handle gracefully | Pass: refuses to guess | Pass |
 
-I didn't add or remove any songs. The main thing I noticed about the dataset is how uneven it is:
+## 4. Limitations and biases
 
-- There are 12 different genres across only 18 songs, so most genres have **only one or two tracks**.
-- The catalog leans heavily toward chill, acoustic, lower-energy music. The median energy is 0.43 and the median acousticness is 0.70. About 40% of the songs are tagged `chill` or `relaxed`.
-- Some combinations a listener might reasonably ask for (like upbeat jazz, or melancholy pop) simply don't exist in the data.
+- **Tiny, skewed catalog.** 18 songs, 12 genres, most genres with 1–2 tracks, leaning toward chill/acoustic music. Whatever genre you name, the "best" match is often the *only* match. Retrieval cannot recommend what isn't there.
+- **Knowledge-base bias.** The 13 context cards encode *my* assumptions about what music suits an activity (for example, that studying means low-energy lofi, or that workouts mean pop and rock). Someone who studies to metal or works out to jazz is systematically served worse. The cards are also English-only and Western-centric in their genre vocabulary.
+- **Keyword retrieval has no synonyms.** "Bummed" won't match "sad", and non-English requests are refused. It fails safe, but it isn't helpful.
+- **Multi-intent requests collapse to one intent.** A second card is only blended in if it scores at least 60% of the best card, so "sad songs for a road trip" loses the sadness.
+- **Confidence is a heuristic, not a probability.** It is `fit × evidence − 0.15 if relaxed`. A one-word request like "pop" scores 1.00 because every pop song fits "pop" perfectly, which is not the same as the user being satisfied.
+- **Negation handling is narrow.** It covers genres only ("not jazz"), not moods ("not sad") or features ("not too loud").
 
-This matters a lot once the recommender starts running — the shape of the catalog quietly shapes the output.
+## 5. Misuse and prevention
 
----
+The realistic misuse surface for a music recommender is small, but the same patterns would matter in a higher-stakes system:
 
-## 4. Algorithm Summary
+- **Prompt injection or manipulation.** User text is used only for keyword matching and retrieval. It is **never** placed in an LLM prompt, and Gemini only sees song fields, score reasons and card guidance. Override-style text is flagged in the logs and output. Gemini replies are validated (non-empty, ≤ 70 words, must name the song) and fall back to templates on failure.
+- **Over-trusting the output.** The `needs_review` flag, the confidence score and the plain-language message are designed so the system never presents a relaxed or impossible match as a confident answer.
+- **Profiling.** VibeFinder stores nothing about the user and models no demographics. If it were extended with listening history, it should keep the same rule: score songs against stated preferences, not inferred identity.
+- **Resource abuse.** Input is capped at 300 characters and `k` at 10. The agent loop is capped at 3 iterations.
 
-My scoring works like a judge handing out points. Every song starts at zero, and I walk through a short checklist for each one, adding points when the song matches what the listener asked for.
+## 6. What surprised me while testing reliability
 
-- If the song's **genre** matches the listener's pick exactly, it earns +2.0 points. Genre is the strongest signal.
-- If the **mood** matches, it earns +1.0 more.
-- For each **numeric vibe** the listener specified (energy, danceability, acousticness), I measure how close the song's value is to the listener's target. A perfect match is worth close to a full point; the reward shrinks the farther apart they are. If a song is way off, it gets zero for that category — I don't take points away.
+- **My first test suite proved nothing.** It passed 17/17 because I wrote the cases after seeing the outputs. Ten minutes of throwing *unscripted* requests at the system found the worst bug in the project: "not jazz" produced jazz **at confidence 1.00**. Retrieval made it worse, because the word "jazz" pulled in the jazz card. The fix needed two layers: an avoid list in scoring, and stripping negated genres from the retrieval query.
+- **A bug that only appears across processes.** The conflict message listed features in a set's iteration order, which changes with Python's per-process hash randomization. My "run it 5 times" consistency check ran in one process, so it could never see it. I only noticed because two terminal runs differed. That changed how I think about "deterministic".
+- **Confidence was easier to compute than to make meaningful.** Raw "fit" was ~1.0 for almost everything. Adding an *evidence* term (how strongly retrieval matched) is what made vague requests like "something upbeat" drop to 0.60 and get flagged.
 
-Once every song has a score, I sort from highest to lowest and show the top five, with the specific reasons it won: "genre match", "mood match", "energy proximity (+0.98)". The explanation is as important as the ranking to me — I wanted to see *why* each song was picked.
+## 7. Changes from VibeFinder 1.0 (and why)
 
-The main change from the starter code: the starter just returned the first five songs regardless of input. Now the ranking actually responds to the listener, and every pick comes with a plain-language reason.
+| 1.0 problem (from its model card) | 2.0 change |
+|---|---|
+| Never flagged unsatisfiable requests | `unsatisfiable` and `conflict` checks, plus a human-review flag |
+| Bad matches scored 0, not negative | Numeric similarity now runs from +1 to −1 |
+| One genre monopolized the top 5 | Variety re-rank (genre/artist repeat penalty) |
+| Genre over-weighting hid adjacent styles | Related-genre partial credit ("pop" ~ "indie pop") |
+| Users had to write a Python dict | Free-text requests + retrieval |
+| `Recommender` class was a TODO stub | Wired to the shared scorer; the Module 3 tests pass |
 
----
+## 8. AI collaboration
 
-## 5. Observed Behavior / Biases
+I built this project with an AI coding assistant (Claude) acting as a pair programmer. It read the project spec, inspected my Module 3 repo, proposed an architecture, wrote code and tests, and ran them. My job was to decide the scope, check the claims against real output, and push back.
 
-The biggest pattern I noticed is that **the genre match dominates almost everything else.** Because genre is worth +2.0 and each numeric feature can only earn up to +1.0, picking any genre essentially locks in a +2.0 head-start for every song in that genre. Combined with the thin catalog, this means a listener asking for `rock` always gets the one rock song, a listener asking for `jazz` always gets the one jazz song — regardless of what else they ask for.
-
-A second pattern: **the system quietly favors chill, acoustic music.** The catalog is biased that way, so when a listener's numeric preferences are vague or lean neutral, mid-energy acoustic songs win because they're never *too far* from anyone's target. The data is doing some of the recommending whether I meant it to or not.
-
-A third issue: **the system never penalizes a bad match.** If a song misses every single preference, it scores zero — the same as a song that just wasn't scored at all. That means the recommender can look confident about a terrible answer, because the math only adds and never subtracts.
-
----
-
-## 6. Evaluation Process
-
-I tested VibeFinder against several made-up listeners to see how the top-5 shifted:
-
-- **The upbeat pop fan** — happy pop, high energy. The top pick was *Sunrise City*, which is exactly that. ✓
-- **The chill lofi listener** — relaxed vibe, acoustic, low energy. Top picks were lofi and ambient tracks. ✓
-- **The contradiction** — I asked for lofi (normally slow and acoustic) but at *high* energy and *not* acoustic — an impossible combination. The system served three slow mellow lofi songs and completely ignored the energy request.
-- **The extremist** — ambient music that was also intense, maximally energetic, maximally acoustic, and totally undanceable. The system returned a chill ambient song whose actual numbers were far from the targets, because the genre match outweighed everything.
-
-I also ran a **weight-shift experiment**: I halved the genre weight (2.0 → 1.0) and doubled the numeric-feature weight (1.0 → 2.0). The straightforward profiles still returned the same top picks, which told me those rankings weren't fragile. But the adversarial profiles swung in the opposite direction — now the numeric targets dominated, and listeners asking for "lofi" got gym songs because the gym songs matched the numbers. That was a useful lesson: rebalancing weights doesn't fix the deeper problem of the two kinds of signals (categorical vs. numeric) competing instead of cooperating.
-
-What surprised me most was how **politely the system fails** on impossible requests. It never flags that a combination of preferences is unsatisfiable — it just hands over the closest fit and pretends that's the answer. For a real user, that's worse than returning nothing.
-
----
-
-## 7. Intended Use and Non-Intended Use
-
-**Intended use.** This is a classroom simulation. I built it to practice writing scoring logic, to see how small design choices (weights, penalty functions, catalog shape) ripple into output, and to produce a system I could reason about and critique honestly.
-
-**Not intended for.**
-
-- Real music recommendations for real listeners. The catalog is 18 songs — too small to be useful.
-- Any production or decision-making context. The scoring is naïve, the data is unbalanced, and the system cannot tell a user when their request is unsatisfiable.
-- Any setting where the recommendations are presented as authoritative. The system is confident on inputs it cannot actually handle.
-- Any demographic or behavioral profiling. I only score songs against stated preferences; I don't model listeners.
-
----
-
-## 8. Ideas for Improvement
-
-If I kept developing VibeFinder, I'd try three things:
-
-1. **Penalize mismatches, not just reward matches.** Right now, being wrong about genre or mood is "free" — it just doesn't add points. Subtracting a small amount for mismatches would push the system away from confidently wrong answers.
-2. **Flag unsatisfiable requests.** Before scoring, I'd check whether any song in the catalog is even close to the listener's targets. If none is, say so instead of returning a bad fit.
-3. **Add diversity to the top-k.** Right now the top-3 for any lofi-leaning profile is literally all three lofi songs. I'd introduce a rule that prevents the same genre or artist from monopolizing the list, so the listener sees a slightly wider range of good matches.
-
-A bigger-picture change I'd try: let listeners weight their own preferences. Someone who cares deeply about mood but doesn't care about genre should be able to say so, and have the scoring reflect that.
-
----
-
-## 9. Personal Reflection
-
-My biggest learning moment was watching the weight-shift experiment in Step 3 of Phase 4. I expected that halving the genre weight would just produce "slightly better" results across the board. Instead, it fixed one failure mode and created the opposite one — now the numeric targets ran the show and the genre label became decorative. That drove home that **you can't just tune your way out of a bad scoring design**. The weights aren't a dial you turn until things feel right; they're a statement about which signals you trust, and if those signals disagree with each other, no single weighting works for everyone.
-
-AI tools were genuinely useful at a few specific moments: when I needed to translate my scoring recipe into clean Python, when I wanted a second opinion on the difference between `list.sort()` and `sorted()`, and when I needed help spotting biases I wasn't going to find on my own (I would not have noticed on my own that genre and acousticness are correlated in the data, meaning the scorer rewards the same underlying trait twice). The place I had to double-check the AI's work the most was in the actual numbers — when it told me a song scored X, I ran the code myself and read the output rather than trusting the explanation. The reasoning was almost always right; the arithmetic sometimes wasn't. I also had to push back on suggestions that would have made the code more "general" or "flexible" than the project actually needed.
-
-What surprised me about simple algorithms is how much they *feel* like recommendations even when they're doing something very basic. +2 for genre, +1 for mood, a bit of proximity math — and the output looks like a real "Top 5 For You" list, complete with explanations. The polish of the output tricks you (and the user) into thinking the system knows more than it does. That was probably the most important thing I took away from this project: a well-formatted result is not the same as a trustworthy result, and the responsibility to tell those apart lives with the person building the system.
-
-If I extended this project, I'd want to try replacing the hand-tuned weights with something learned from actual listening data — give the system a bunch of "this user liked these songs" pairs and see if it can figure out its own weights. I'd also want to build a tiny web UI so I could watch the top-5 change in real time as I move sliders around; a lot of what I learned in Phase 4 came from rerunning the CLI, and a more interactive view would make the system's behavior easier to probe. Finally, I'd want to grow the catalog to a few hundred songs. Many of the "biases" I found really come from the catalog having 18 songs; it would be interesting to see which problems survive at a bigger scale and which ones go away.
+- **A suggestion I accepted:** use *structured* context cards (genres, moods and numeric ranges in front matter) instead of plain text documents for retrieval. It was the clearest way to meet the requirement that RAG must *change* the system's behaviour, not just print retrieved text beside a normal answer. The retrieval-lift numbers (2/7 → 7/7) show that it does.
+- **A suggestion I did not accept as written:** the first evaluation harness. It reported 17/17 passing, but the cases had been written after looking at the system's outputs, so the score mostly measured agreement with itself. I didn't treat that as evidence of reliability. Instead I had the system probed with requests it hadn't been tuned on, which exposed the negation and "work out" bugs. Those cases were added as regression tests, so the final 19/19 includes cases that originally **failed**.
+- **Scoped down:** the LLM's role. Having Gemini parse the whole request was an option, but it would have made ranking non-deterministic, put user text into prompts (an injection surface), and made the system untestable offline. Gemini was limited to an optional explanation layer with output validation and a template fallback.
+- **Where I double-checked the AI:** every number in the README was copied from an actual run, not from the assistant's summary. One "deterministic" claim turned out to be false across processes (see section 6).
