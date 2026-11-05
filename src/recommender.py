@@ -145,6 +145,14 @@ def score_song(prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
             score += pts
             reasons.append(f"genre fits the context: {song['genre']} (+{pts:.2f})")
 
+    avoid_genres = _as_list(prefs.get("avoid_genres"))
+    if avoid_genres:
+        aff = _best_affinity(avoid_genres, song["genre"])
+        if aff:
+            pts = GENRE_WEIGHT * aff
+            score -= pts
+            reasons.append(f"avoided genre: {song['genre']} misses your request (-{pts:.2f})")
+
     explicit_moods = _as_list(prefs.get("mood")) + _as_list(prefs.get("moods"))
     if any(m.lower() == song["mood"].lower() for m in explicit_moods):
         score += MOOD_WEIGHT

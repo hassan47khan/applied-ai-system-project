@@ -22,6 +22,10 @@ MAX_CONTEXT_CARDS = 2
 
 _NORMALISE = [(re.compile(r"\blo[- ]fi\b"), "lofi")]
 
+# Words that flip the meaning of the genre that follows ("not jazz", "I hate rock").
+_NEGATION = (r"(?:not|no|without|except|avoid|skip|hate|hates|dislike|"
+             r"don'?t want|don'?t like|do not want|do not like)\s+(?:any\s+|the\s+|more\s+)?")
+
 # (regex, value). Negated forms are checked first so "not acoustic" never reads as "acoustic".
 _NUMERIC_LEXICON: List[Tuple[str, re.Pattern, float]] = [
     ("acousticness", re.compile(r"\b(?:not|non|no|without|isn't)[ -](?:very |too )?acoustic\b"), 0.10),
@@ -37,6 +41,7 @@ _NUMERIC_LEXICON: List[Tuple[str, re.Pattern, float]] = [
 @dataclass
 class Profile:
     genres: List[str] = field(default_factory=list)
+    avoid_genres: List[str] = field(default_factory=list)
     moods: List[str] = field(default_factory=list)
     context_genres: List[str] = field(default_factory=list)
     context_moods: List[str] = field(default_factory=list)
@@ -59,6 +64,8 @@ class Profile:
         prefs: Dict = {"genre_scale": self.genre_scale}
         if self.genres:
             prefs["genres"] = list(self.genres)
+        if self.avoid_genres:
+            prefs["avoid_genres"] = list(self.avoid_genres)
         if self.moods:
             prefs["moods"] = list(self.moods)
         if self.context_genres:
@@ -72,6 +79,8 @@ class Profile:
         parts = []
         if self.genres:
             parts.append("genre=" + "/".join(self.genres))
+        if self.avoid_genres:
+            parts.append("avoid=" + "/".join(self.avoid_genres))
         if self.moods:
             parts.append("mood=" + "/".join(self.moods))
         if self.context_genres:
@@ -88,11 +97,21 @@ class Profile:
 
     def copy(self) -> "Profile":
         return Profile(
-            genres=list(self.genres), moods=list(self.moods),
+            genres=list(self.genres), avoid_genres=list(self.avoid_genres), moods=list(self.moods),
             context_genres=list(self.context_genres), context_moods=list(self.context_moods),
             targets=dict(self.targets), explicit_numeric=set(self.explicit_numeric),
             cards=list(self.cards), genre_scale=self.genre_scale,
         )
+
+
+def strip_negated_genres(text: str, genre_vocab: Sequence[str]) -> str:
+    """Remove 'not jazz'-style phrases so a rejected genre can't pull in its own context card."""
+    working = text
+    for pattern, repl in _NORMALISE:
+        working = pattern.sub(repl, working.lower())
+    for genre in sorted(genre_vocab, key=len, reverse=True):
+        working = re.sub(rf"\b{_NEGATION}{re.escape(genre.lower())}\b", " ", working.lower())
+    return re.sub(r"\s+", " ", working).strip()
 
 
 def parse_explicit(text: str, genre_vocab: Sequence[str], mood_vocab: Sequence[str]) -> Profile:
@@ -104,6 +123,11 @@ def parse_explicit(text: str, genre_vocab: Sequence[str], mood_vocab: Sequence[s
     profile = Profile()
     # Longest genre names first so "ambient electronic" is not also read as "ambient".
     for genre in sorted(genre_vocab, key=len, reverse=True):
+        negated = re.compile(rf"\b{_NEGATION}{re.escape(genre.lower())}\b")
+        if negated.search(working):
+            profile.avoid_genres.append(genre)   # "not jazz" must never be read as "jazz"
+            working = negated.sub(" ", working)
+            continue
         pattern = re.compile(rf"\b{re.escape(genre.lower())}\b")
         if pattern.search(working):
             profile.genres.append(genre)

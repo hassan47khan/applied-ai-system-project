@@ -44,8 +44,12 @@ def _stem(token: str) -> str:
     return token
 
 
+_WORK_OUT = re.compile(r"\bwork(?:ing|s|ed)? out\b")   # "work out" is not "work"
+
+
 def tokenize(text: str) -> List[str]:
-    return [_stem(t) for t in _TOKEN_RE.findall(text.lower()) if t not in _STOPWORDS]
+    text = _WORK_OUT.sub("workout", text.lower())
+    return [_stem(t) for t in _TOKEN_RE.findall(text) if t not in _STOPWORDS]
 
 
 @dataclass

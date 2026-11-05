@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .guardrails import sanitize_query
 from .llm import Explainer, TemplateExplainer
-from .profile import Profile, build_profile
+from .profile import Profile, build_profile, strip_negated_genres
 from .recommender import (
     NUMERIC_ATTRS, genre_affinity, load_songs, max_score, numeric_distance, rank_songs,
 )
@@ -112,8 +112,9 @@ class VibeFinderAgent:
         step("guardrail", "input accepted" + (f" with warnings: {'; '.join(cleaned.warnings)}" if cleaned.warnings else ""))
 
         # 2. Retrieve + plan ---------------------------------------------------
+        retrieval_text = strip_negated_genres(cleaned.text, self.genre_vocab)
         retrieved = (
-            self.retriever.retrieve(cleaned.text, k=3, min_score=RETRIEVAL_MIN_SCORE)
+            self.retriever.retrieve(retrieval_text, k=3, min_score=RETRIEVAL_MIN_SCORE)
             if self.retriever else []
         )
         result.retrieved = [(c.id, round(s, 3)) for c, s in retrieved]
