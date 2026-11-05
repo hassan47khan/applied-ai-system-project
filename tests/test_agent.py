@@ -89,6 +89,22 @@ def test_same_input_same_output(agent):
     assert len(runs) == 1
 
 
+def test_output_identical_across_processes():
+    """Set iteration order changes with PYTHONHASHSEED; output text must not."""
+    import os
+    import subprocess
+    import sys
+    outputs = []
+    for seed in ("1", "2", "3"):
+        env = dict(os.environ, PYTHONHASHSEED=seed)
+        proc = subprocess.run(
+            [sys.executable, "-m", "src.main", "--trace", "lofi at maximum energy, not acoustic"],
+            capture_output=True, text=True, env=env, check=True,
+        )
+        outputs.append(proc.stdout)
+    assert outputs[0] == outputs[1] == outputs[2]
+
+
 def test_trace_records_every_stage(agent):
     actions = [t["action"] for t in agent.run("beach party this summer").trace]
     for stage in ("guardrail", "retrieve", "plan", "act", "verify", "decide"):

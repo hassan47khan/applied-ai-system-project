@@ -220,7 +220,9 @@ class VibeFinderAgent:
         targets = {a: t for a, t in profile.targets.items()}
 
         # conflict: explicit genre vs explicit numeric request
-        explicit_numeric = {a: targets[a] for a in profile.explicit_numeric if a in targets}
+        # NUMERIC_ATTRS order (not set order) keeps messages identical across runs
+        explicit_numeric = {a: targets[a] for a in NUMERIC_ATTRS
+                            if a in profile.explicit_numeric and a in targets}
         if profile.genres and explicit_numeric and profile.genre_scale == 1.0:
             in_genre = [s for s in self.songs if any(genre_affinity(g, s["genre"]) for g in profile.genres)]
             if in_genre:

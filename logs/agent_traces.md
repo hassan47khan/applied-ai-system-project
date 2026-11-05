@@ -127,7 +127,7 @@ Request: `'ambient music that is intense, loud, very danceable and acoustic'`
 3. **plan**: genre=ambient, mood=intense, context genres~pop/latin pop/indie pop/world fusion, context moods~happy/energetic, energy=0.92, danceability=0.88, acousticness=0.85
 4. **act**: iteration 1: ranked 18 songs; top = Monsoon Market (3.92/8.25)
 5. **verify**: fit=0.48 evidence=1.00 confidence=0.48; issues: conflict, unsatisfiable, low_confidence
-6. **revise**: no ambient track is close to energy 0.92, acousticness 0.85, danceability 0.88 -> genre weight x0.5, re-ranking
+6. **revise**: no ambient track is close to energy 0.92, danceability 0.88, acousticness 0.85 -> genre weight x0.5, re-ranking
 7. **act**: iteration 2: ranked 18 songs; top = Monsoon Market (3.55/7.12)
 8. **diversify**: diversity re-rank changed the top-5; brought in Storm Runner
 9. **verify**: fit=0.50 evidence=1.00 confidence=0.35; issues: unsatisfiable, low_confidence
