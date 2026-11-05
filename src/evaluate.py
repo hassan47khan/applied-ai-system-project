@@ -29,6 +29,7 @@ class Case:
     top1_genres: Optional[Set[str]] = None
     top3_contains: Optional[str] = None
     top3_excludes_genres: Optional[Set[str]] = None
+    all_excludes_genres: Optional[Set[str]] = None
     expect_review: Optional[bool] = None
     expect_issue: Optional[str] = None
     expect_relaxed: Optional[bool] = None
@@ -58,6 +59,25 @@ CASES: List[Case] = [
          top3_excludes_genres={"jazz", "classic jazz"}),
     Case("negation + 'work out'", "I hate rock, give me something to work out to", "behaviour",
          top1_genres={"pop", "latin pop"}, top3_excludes_genres={"rock"}, expect_review=False),
+    Case("negation: 'anything but jazz'", "anything but jazz", "behaviour",
+         top3_excludes_genres={"jazz", "classic jazz"}, expect_review=True, expect_issue="exclusion_only"),
+    Case("negation: curly apostrophe", "I don\u2019t want jazz, play something relaxing", "behaviour",
+         top3_excludes_genres={"jazz", "classic jazz"}),
+    Case("negation: list of genres", "not jazz or rock, I need to focus", "behaviour",
+         top3_excludes_genres={"jazz", "classic jazz", "rock"}),
+    Case("negated feature: 'not loud'", "not loud music", "behaviour",
+         expect_review=True, expect_issue="exclusion_only"),
+    Case("negated mood: 'not happy'", "not happy", "behaviour",
+         expect_review=True, expect_issue="exclusion_only"),
+    Case("rejected genre at any rank", "pump me up for the gym but no pop", "behaviour",
+         top1_genres={"rock"}, all_excludes_genres={"pop", "indie pop", "latin pop"}),
+    Case("exclusion only", "no jazz", "behaviour", expect_review=True, expect_issue="exclusion_only"),
+    Case("partial genre name", "folk music", "behaviour", top1_genres={"indie folk"}, expect_review=False),
+    Case("off-topic with one known word", "I am late for my dentist appointment", "behaviour",
+         expect_review=True, expect_issue="no_signal", expect_no_recs=True),
+    Case("contradictory contexts", "sleep then gym", "behaviour",
+         top1_genres={"ambient", "ambient electronic", "lofi"}, expect_review=True,
+         expect_issue="mixed_context"),
     Case("contradiction: lofi but max energy", "lofi at maximum energy, not acoustic", "behaviour",
          expect_relaxed=True, expect_review=True),
     Case("impossible combo (adversarial)", "ambient music that is intense, loud, very danceable and acoustic",
@@ -91,6 +111,11 @@ def check(case: Case, result: AgentResult) -> List[str]:
                if r.song["genre"] in case.top3_excludes_genres]
         if bad:
             failures.append(f"top 3 contains excluded genre: {bad}")
+    if case.all_excludes_genres is not None:
+        bad = [r.song["title"] for r in result.recommendations
+               if r.song["genre"] in case.all_excludes_genres]
+        if bad:
+            failures.append(f"recommendations contain excluded genre: {bad}")
     if case.expect_review is not None and result.needs_review != case.expect_review:
         failures.append(f"needs_review={result.needs_review}, expected {case.expect_review}")
     if case.expect_issue is not None and case.expect_issue not in result.issues:

@@ -55,26 +55,38 @@ class UserProfile:
 
 
 def load_songs(csv_path: Union[str, Path] = DEFAULT_SONGS_PATH) -> List[Dict]:
-    """Load the catalog into dicts with numeric fields coerced. Raises a clear error if missing."""
+    """Load the catalog into dicts with numeric fields coerced.
+
+    Raises FileNotFoundError if the file is missing, ValueError if it is empty or malformed.
+    """
     path = Path(csv_path)
     if not path.exists():
         raise FileNotFoundError(f"Song catalog not found at {path}")
     songs: List[Dict] = []
     with open(path, mode="r", encoding="utf-8", newline="") as f:
-        for row in csv.DictReader(f):
-            songs.append({
-                "id": int(row["id"]),
-                "title": row["title"],
-                "artist": row["artist"],
-                "genre": row["genre"],
-                "mood": row["mood"],
-                "energy": float(row["energy"]),
-                "tempo_bpm": float(row["tempo_bpm"]),
-                "valence": float(row["valence"]),
-                "danceability": float(row["danceability"]),
-                "acousticness": float(row["acousticness"]),
-            })
+        reader = csv.DictReader(f)
+        try:
+            for row in reader:
+                try:
+                    songs.append(_parse_song(row))
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ValueError(f"{path}, line {reader.line_num}: bad song row ({exc!r})") from exc
+        except csv.Error as exc:
+            raise ValueError(f"{path}, line {reader.line_num}: {exc}") from exc
+    if not songs:
+        raise ValueError(f"Song catalog at {path} has no songs")
     return songs
+
+
+def _parse_song(row: Dict) -> Dict:
+    song: Dict = {"id": int(row["id"])}
+    for key in ("title", "artist", "genre", "mood"):
+        if not row[key]:
+            raise ValueError(f"empty {key}")
+        song[key] = row[key]
+    for key in ("energy", "tempo_bpm", "valence", "danceability", "acousticness"):
+        song[key] = float(row[key])
+    return song
 
 
 def _as_list(value) -> List[str]:

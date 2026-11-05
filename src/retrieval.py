@@ -28,6 +28,16 @@ _STOPWORDS = frozenset(
     "that the their to up was we what when with you your need want like give something "
     "music songs song play listen listening something some for".split()
 )
+# Filler that would otherwise dilute a request now that unknown words count against it.
+# Query-only, so card vectors (and the thresholds tuned on them) are unaffected.
+_QUERY_STOPWORDS = _STOPWORDS | frozenset(
+    "am do does s t m im this then please can will just get getting going".split()
+)
+
+# At least this share of a request's words must appear somewhere in the knowledge base.
+# Otherwise it is about something else, and one incidental word ("late" in "late for my
+# dentist appointment") must not count as a match.
+MIN_QUERY_COVERAGE = 0.5
 
 
 def _stem(token: str) -> str:
@@ -47,9 +57,9 @@ def _stem(token: str) -> str:
 _WORK_OUT = re.compile(r"\bwork(?:ing|s|ed)? out\b")   # "work out" is not "work"
 
 
-def tokenize(text: str) -> List[str]:
+def tokenize(text: str, stopwords: frozenset = _STOPWORDS) -> List[str]:
     text = _WORK_OUT.sub("workout", text.lower())
-    return [_stem(t) for t in _TOKEN_RE.findall(text) if t not in _STOPWORDS]
+    return [_stem(t) for t in _TOKEN_RE.findall(text) if t not in stopwords]
 
 
 @dataclass
@@ -137,18 +147,22 @@ class Retriever:
         for card in cards:
             df.update(set(card.tokens))
         self.idf = {t: math.log((1 + n) / (1 + d)) + 1.0 for t, d in df.items()}
+        self._unseen_idf = math.log(1 + n) + 1.0   # a word no card uses is maximally rare
         self._vectors = [self._vector(card.tokens) for card in cards]
 
     def _vector(self, tokens: List[str]) -> Dict[str, float]:
-        tf = Counter(t for t in tokens if t in self.idf)
-        vec = {t: (1 + math.log(c)) * self.idf[t] for t, c in tf.items()}
+        # Unseen words stay in the vector: they can't match a card, but they must still count
+        # in the norm, or a request with one known word looks like a perfect match.
+        tf = Counter(tokens)
+        vec = {t: (1 + math.log(c)) * self.idf.get(t, self._unseen_idf) for t, c in tf.items()}
         norm = math.sqrt(sum(v * v for v in vec.values()))
         return {t: v / norm for t, v in vec.items()} if norm else {}
 
     def retrieve(self, query: str, k: int = 3, min_score: float = 0.08) -> List[Tuple[Card, float]]:
         """Top-k cards with cosine similarity >= min_score, best first."""
-        qvec = self._vector(tokenize(query))
-        if not qvec:
+        qvec = self._vector(tokenize(query, _QUERY_STOPWORDS))
+        known = sum(t in self.idf for t in qvec)
+        if not qvec or known < MIN_QUERY_COVERAGE * len(qvec):
             return []
         scored = []
         for card, dvec in zip(self.cards, self._vectors):

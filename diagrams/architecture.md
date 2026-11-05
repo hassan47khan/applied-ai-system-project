@@ -4,7 +4,7 @@
 flowchart TD
     U([User request<br/>free text]) --> G{Guardrails<br/>src/guardrails.py}
     G -- "empty / non-text" --> RJ[Reject with guidance<br/>issue: invalid_input]
-    G -- "cleaned text<br/>(truncated, override text flagged)" --> NEG[Strip negated genres<br/>'not jazz' -> avoid list]
+    G -- "cleaned text<br/>(truncated, override text flagged)" --> NEG[Strip rejected phrases<br/>'not jazz' -> hard exclusion]
 
     subgraph RAG["Retrieval (RAG) - src/retrieval.py"]
         KB[(Knowledge base<br/>data/knowledge/*.md<br/>13 context cards)]
@@ -22,7 +22,7 @@ flowchart TD
     subgraph AGENT["Agent loop - src/agent.py (max 3 iterations)"]
         A[Act: score + rank all songs<br/>src/recommender.py]
         D[Variety re-rank<br/>genre/artist repeats penalised]
-        V{Verify<br/>confidence = fit x evidence<br/>conflict? unsatisfiable?}
+        V{Verify<br/>confidence = fit x evidence<br/>conflict? unsatisfiable?<br/>mixed context? exclusion only?}
         RV[Revise: relax genre weight x0.5]
         A --> D --> V
         V -- "conflict" --> RV --> A
@@ -31,7 +31,7 @@ flowchart TD
     CAT --> A
 
     V -- "no issues" --> E[Explainer<br/>src/llm.py<br/>template, or Gemini with validation + fallback]
-    V -- "relaxed / unsatisfiable / low confidence" --> HR[Flag: needs human review<br/>+ clarifying message]
+    V -- "relaxed / unsatisfiable / mixed / low confidence" --> HR[Flag: needs human review<br/>+ clarifying message]
     HR --> E
     R -. "card guidance grounds each explanation" .-> E
     E --> OUT([Top-k songs + explanations<br/>+ confidence + trace])
@@ -39,8 +39,8 @@ flowchart TD
     H -. "refined request" .-> U
 
     subgraph TESTING["Reliability testing"]
-        T1[pytest: 53 unit/behaviour tests]
-        T2[src/evaluate.py: 19 checks,<br/>RAG vs no-RAG baseline,<br/>confidence calibration]
+        T1[pytest: 129 unit/behaviour tests]
+        T2[src/evaluate.py: 29 checks,<br/>RAG vs no-RAG baseline,<br/>confidence calibration]
         T3[(logs/: traces, eval results,<br/>vibefinder.log)]
     end
     AGENT -. "every step logged" .-> T3

@@ -7,6 +7,8 @@ change its plan:
   verify   computes a confidence score and looks for problems
              conflict       an explicit genre has no song near the requested feel
              unsatisfiable  no song in the catalog meets all numeric targets together
+             mixed_context  two matched context cards contradicted each other
+             exclusion_only the user said what to avoid but not what they want
              low_confidence confidence is below CONFIDENCE_MIN
   revise   for a `conflict`, relaxes the genre weight so the numeric request wins
   decide   anything the agent had to relax, or could not satisfy, is flagged for a
@@ -21,7 +23,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .guardrails import sanitize_query
 from .llm import Explainer, TemplateExplainer
-from .profile import Profile, build_profile, strip_negated_genres
+from .profile import Profile, build_profile, strip_negated
 from .recommender import (
     NUMERIC_ATTRS, genre_affinity, load_songs, max_score, numeric_distance, rank_songs,
 )
@@ -112,7 +114,7 @@ class VibeFinderAgent:
         step("guardrail", "input accepted" + (f" with warnings: {'; '.join(cleaned.warnings)}" if cleaned.warnings else ""))
 
         # 2. Retrieve + plan ---------------------------------------------------
-        retrieval_text = strip_negated_genres(cleaned.text, self.genre_vocab)
+        retrieval_text = strip_negated(cleaned.text)
         retrieved = (
             self.retriever.retrieve(retrieval_text, k=3, min_score=RETRIEVAL_MIN_SCORE)
             if self.retriever else []
@@ -131,11 +133,23 @@ class VibeFinderAgent:
                               "activity (studying, workout), a mood (chill, happy) or a genre.")
             return result
 
+        candidates = [s for s in self.songs if profile.allows(s)]
+        if len(candidates) < len(self.songs):
+            step("filter", f"removed {len(self.songs) - len(candidates)} rejected songs")
+        if not candidates:
+            step("decide", "no songs left to recommend")
+            result.profile = profile.describe()
+            result.needs_review = True
+            result.issues = ["no_candidates"]
+            result.message = ("Everything in the catalog is ruled out by what you asked me to avoid."
+                              if self.songs else "The song catalog is empty, so I have nothing to recommend.")
+            return result
+
         # 3. Act -> verify -> revise loop ------------------------------------
         top_card_score = retrieved[0][1] if retrieved else 0.0
         for iteration in range(1, MAX_ITERATIONS + 1):
             prefs = profile.to_prefs()
-            ranked = rank_songs(prefs, self.songs)
+            ranked = rank_songs(prefs, candidates)
             picks, moved = self._diversify(ranked)
             ceiling = max_score(prefs) or 1.0
             step("act", f"iteration {iteration}: ranked {len(ranked)} songs; top = "
@@ -147,7 +161,7 @@ class VibeFinderAgent:
             evidence = 1.0 if profile.has_explicit_signal else min(1.0, top_card_score / EVIDENCE_REF)
             relaxed = bool(result.relaxations)
             confidence = max(0.0, fit * evidence - (RELAXATION_PENALTY if relaxed else 0.0))
-            issues = self._verify(profile)
+            issues = self._verify(profile, candidates)
             if confidence < CONFIDENCE_MIN:
                 issues.append(("low_confidence",
                                f"confidence {confidence:.2f} is below {CONFIDENCE_MIN:.2f}"))
@@ -183,8 +197,9 @@ class VibeFinderAgent:
         for relaxation in result.relaxations:
             notes.append(f"I relaxed a preference you gave: {relaxation}. Tell me if the original "
                          f"genre matters more than the feel you described.")
-        if "unsatisfiable" in issue_text:
-            notes.append(issue_text["unsatisfiable"])
+        for code in ("mixed_context", "exclusion_only", "unsatisfiable"):
+            if code in issue_text:
+                notes.append(issue_text[code])
         if "low_confidence" in issue_text:
             notes.append(issue_text["low_confidence"] + "; a more specific request will help.")
         result.message = " ".join(notes) or None
@@ -215,8 +230,14 @@ class VibeFinderAgent:
         return picks, ("diversity re-rank changed the top-%d" % self.k
                        + (f"; brought in {', '.join(moved_in)}" if moved_in else "; reordered only"))
 
-    def _verify(self, profile: Profile) -> List[Tuple[str, str]]:
+    def _verify(self, profile: Profile, candidates: List[Dict]) -> List[Tuple[str, str]]:
         issues: List[Tuple[str, str]] = []
+        if profile.context_clash:
+            issues.append(("mixed_context", profile.context_clash + "."))
+        if not profile.has_preference:
+            issues.append(("exclusion_only",
+                           "You told me what to avoid but not what you want, so these are "
+                           "simply tracks that pass your exclusions."))
         targets = {a: t for a, t in profile.targets.items()}
 
         # conflict: explicit genre vs explicit numeric request
@@ -224,7 +245,7 @@ class VibeFinderAgent:
         explicit_numeric = {a: targets[a] for a in NUMERIC_ATTRS
                             if a in profile.explicit_numeric and a in targets}
         if profile.genres and explicit_numeric and profile.genre_scale == 1.0:
-            in_genre = [s for s in self.songs if any(genre_affinity(g, s["genre"]) for g in profile.genres)]
+            in_genre = [s for s in candidates if any(genre_affinity(g, s["genre"]) for g in profile.genres)]
             if in_genre:
                 best = min(
                     max(numeric_distance(s[a], t) for a, t in explicit_numeric.items()) for s in in_genre
@@ -237,11 +258,11 @@ class VibeFinderAgent:
         # unsatisfiable: no song in the whole catalog meets all numeric targets together
         if targets:
             best_all = min(
-                max(numeric_distance(s[a], t) for a, t in targets.items()) for s in self.songs
+                max(numeric_distance(s[a], t) for a, t in targets.items()) for s in candidates
             )
             if best_all > UNSAT_TOLERANCE:
                 issues.append(("unsatisfiable",
-                               f"No song in the {len(self.songs)}-track catalog meets all of those "
+                               f"No song in the {len(candidates)}-track catalog meets all of those "
                                f"targets at once (closest miss: {best_all:.2f}); these are the nearest options"))
         return issues
 

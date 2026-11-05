@@ -77,10 +77,15 @@ def main(argv=None) -> int:
     parser.add_argument("--k", type=int, default=5, help="number of recommendations (default 5)")
     args = parser.parse_args(argv)
 
+    # A request can hold characters the console encoding lacks (emoji on a cp1252 pipe).
+    # Echoing it back must not crash the app after the agent has already succeeded.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
+
     setup_logging()
     try:
         agent = VibeFinderAgent(explainer=make_explainer(args.llm), k=max(1, min(args.k, 10)))
-    except (FileNotFoundError, OSError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"Could not start VibeFinder: {exc}", file=sys.stderr)
         return 2
 

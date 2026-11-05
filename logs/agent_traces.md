@@ -85,10 +85,11 @@ Request: `'relaxing music but not jazz'`
 
 1. **guardrail**: input accepted
 2. **retrieve**: sleep-wind-down (0.25)
-3. **plan**: avoid=jazz, context genres~ambient/ambient electronic/lofi, context moods~chill, energy=0.15-0.35, danceability=0.25-0.45, acousticness=0.70-0.95
-4. **act**: iteration 1: ranked 18 songs; top = Glacier Drift (5.75/5.75)
-5. **verify**: fit=1.00 evidence=0.83 confidence=0.83; issues: none
-6. **decide**: confidence=0.83, needs_review=False
+3. **plan**: avoid=classic jazz/jazz, context genres~ambient/ambient electronic/lofi, context moods~chill, energy=0.15-0.35, danceability=0.25-0.45, acousticness=0.70-0.95
+4. **filter**: removed 2 rejected songs
+5. **act**: iteration 1: ranked 16 songs; top = Glacier Drift (5.75/5.75)
+6. **verify**: fit=1.00 evidence=0.83 confidence=0.83; issues: none
+7. **decide**: confidence=0.83, needs_review=False
 
 ## negation + 'work out'
 
@@ -97,10 +98,127 @@ Request: `'I hate rock, give me something to work out to'`
 1. **guardrail**: input accepted
 2. **retrieve**: gym-workout (0.28)
 3. **plan**: avoid=rock, context genres~pop/rock, context moods~intense/energetic, energy=0.85-1.00, danceability=0.65-0.95, acousticness=0.00-0.15
-4. **act**: iteration 1: ranked 18 songs; top = Gym Hero (5.75/5.75)
-5. **diversify**: diversity re-rank changed the top-5; reordered only
-6. **verify**: fit=1.00 evidence=0.94 confidence=0.94; issues: none
-7. **decide**: confidence=0.94, needs_review=False
+4. **filter**: removed 1 rejected songs
+5. **act**: iteration 1: ranked 17 songs; top = Gym Hero (5.75/5.75)
+6. **diversify**: diversity re-rank changed the top-5; reordered only
+7. **verify**: fit=1.00 evidence=0.94 confidence=0.94; issues: none
+8. **decide**: confidence=0.94, needs_review=False
+
+## negation: 'anything but jazz'
+
+Request: `'anything but jazz'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: no context card matched
+3. **plan**: avoid=classic jazz/jazz
+4. **filter**: removed 2 rejected songs
+5. **act**: iteration 1: ranked 16 songs; top = Chrome Highway (0.00/1.00)
+6. **verify**: fit=0.00 evidence=0.00 confidence=0.00; issues: exclusion_only, low_confidence
+7. **decide**: confidence=0.00, needs_review=True
+
+## negation: curly apostrophe
+
+Request: `'I don’t want jazz, play something relaxing'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: sleep-wind-down (0.25)
+3. **plan**: avoid=classic jazz/jazz, context genres~ambient/ambient electronic/lofi, context moods~chill, energy=0.15-0.35, danceability=0.25-0.45, acousticness=0.70-0.95
+4. **filter**: removed 2 rejected songs
+5. **act**: iteration 1: ranked 16 songs; top = Glacier Drift (5.75/5.75)
+6. **verify**: fit=1.00 evidence=0.83 confidence=0.83; issues: none
+7. **decide**: confidence=0.83, needs_review=False
+
+## negation: list of genres
+
+Request: `'not jazz or rock, I need to focus'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: late-night-study (0.26)
+3. **plan**: avoid=classic jazz/jazz/rock, context genres~lofi/ambient/ambient electronic, context moods~focused/chill, energy=0.20-0.45, danceability=0.30-0.62, acousticness=0.65-0.95
+4. **filter**: removed 3 rejected songs
+5. **act**: iteration 1: ranked 15 songs; top = Focus Flow (5.75/5.75)
+6. **diversify**: diversity re-rank changed the top-5; brought in Spacewalk Thoughts
+7. **verify**: fit=1.00 evidence=0.87 confidence=0.87; issues: none
+8. **decide**: confidence=0.87, needs_review=False
+
+## negated feature: 'not loud'
+
+Request: `'not loud music'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: no context card matched
+3. **plan**: energy=0.00-0.60
+4. **act**: iteration 1: ranked 18 songs; top = Blue Note Avenue (1.50/1.50)
+5. **verify**: fit=1.00 evidence=0.00 confidence=0.00; issues: exclusion_only, low_confidence
+6. **decide**: confidence=0.00, needs_review=True
+
+## negated mood: 'not happy'
+
+Request: `'not happy'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: no context card matched
+3. **plan**: avoid mood=happy
+4. **filter**: removed 3 rejected songs
+5. **act**: iteration 1: ranked 15 songs; top = Blue Note Avenue (0.00/1.00)
+6. **verify**: fit=0.00 evidence=0.00 confidence=0.00; issues: exclusion_only, low_confidence
+7. **decide**: confidence=0.00, needs_review=True
+
+## rejected genre at any rank
+
+Request: `'pump me up for the gym but no pop'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: gym-workout (0.36)
+3. **plan**: avoid=indie pop/latin pop/pop, context genres~pop/rock, context moods~intense/energetic, energy=0.85-1.00, danceability=0.65-0.95, acousticness=0.00-0.15
+4. **filter**: removed 4 rejected songs
+5. **act**: iteration 1: ranked 14 songs; top = Storm Runner (5.75/5.75)
+6. **diversify**: diversity re-rank changed the top-5; reordered only
+7. **verify**: fit=1.00 evidence=1.00 confidence=1.00; issues: none
+8. **decide**: confidence=1.00, needs_review=False
+
+## exclusion only
+
+Request: `'no jazz'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: no context card matched
+3. **plan**: avoid=classic jazz/jazz
+4. **filter**: removed 2 rejected songs
+5. **act**: iteration 1: ranked 16 songs; top = Chrome Highway (0.00/1.00)
+6. **verify**: fit=0.00 evidence=0.00 confidence=0.00; issues: exclusion_only, low_confidence
+7. **decide**: confidence=0.00, needs_review=True
+
+## partial genre name
+
+Request: `'folk music'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: no context card matched
+3. **plan**: genre=indie folk
+4. **act**: iteration 1: ranked 18 songs; top = Dust and Vinyl (1.50/1.50)
+5. **verify**: fit=1.00 evidence=1.00 confidence=1.00; issues: none
+6. **decide**: confidence=1.00, needs_review=False
+
+## off-topic with one known word
+
+Request: `'I am late for my dentist appointment'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: no context card matched
+3. **plan**: (no preferences detected)
+4. **decide**: no usable preferences found; refusing to guess
+
+## contradictory contexts
+
+Request: `'sleep then gym'`
+
+1. **guardrail**: input accepted
+2. **retrieve**: sleep-wind-down (0.23), gym-workout (0.20)
+3. **plan**: context genres~ambient/ambient electronic/lofi, context moods~chill, energy=0.15-0.35, danceability=0.25-0.45, acousticness=0.70-0.95
+4. **act**: iteration 1: ranked 18 songs; top = Glacier Drift (5.75/5.75)
+5. **verify**: fit=1.00 evidence=0.75 confidence=0.75; issues: mixed_context
+6. **decide**: confidence=0.75, needs_review=True
 
 ## contradiction: lofi but max energy
 
@@ -123,15 +241,14 @@ Request: `'lofi at maximum energy, not acoustic'`
 Request: `'ambient music that is intense, loud, very danceable and acoustic'`
 
 1. **guardrail**: input accepted
-2. **retrieve**: house-party-dance (0.13)
-3. **plan**: genre=ambient, mood=intense, context genres~pop/latin pop/indie pop/world fusion, context moods~happy/energetic, energy=0.92, danceability=0.88, acousticness=0.85
-4. **act**: iteration 1: ranked 18 songs; top = Monsoon Market (3.92/8.25)
-5. **verify**: fit=0.48 evidence=1.00 confidence=0.48; issues: conflict, unsatisfiable, low_confidence
+2. **retrieve**: no context card matched
+3. **plan**: genre=ambient, mood=intense, energy=0.92, danceability=0.88, acousticness=0.85
+4. **act**: iteration 1: ranked 18 songs; top = Gym Hero (3.07/7.00)
+5. **verify**: fit=0.44 evidence=1.00 confidence=0.44; issues: conflict, unsatisfiable, low_confidence
 6. **revise**: no ambient track is close to energy 0.92, danceability 0.88, acousticness 0.85 -> genre weight x0.5, re-ranking
-7. **act**: iteration 2: ranked 18 songs; top = Monsoon Market (3.55/7.12)
-8. **diversify**: diversity re-rank changed the top-5; brought in Storm Runner
-9. **verify**: fit=0.50 evidence=1.00 confidence=0.35; issues: unsatisfiable, low_confidence
-10. **decide**: confidence=0.35, needs_review=True
+7. **act**: iteration 2: ranked 18 songs; top = Gym Hero (3.07/6.25)
+8. **verify**: fit=0.49 evidence=1.00 confidence=0.34; issues: unsatisfiable, low_confidence
+9. **decide**: confidence=0.34, needs_review=True
 
 ## vague request
 

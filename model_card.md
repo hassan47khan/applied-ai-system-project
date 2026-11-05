@@ -23,10 +23,10 @@
 
 | Evaluation | Result |
 |---|---|
-| Evaluation harness (`python -m src.evaluate`) | **19/19 checks pass**: 11 behaviour, 7 robustness, 1 consistency |
-| Unit and behaviour tests (`python -m pytest`) | **53/53 pass** |
+| Evaluation harness (`python -m src.evaluate`) | **29/29 checks pass**: 23 behaviour, 5 robustness, 1 consistency |
+| Unit and behaviour tests (`python -m pytest`) | **129/129 pass** |
 | Retrieval lift on situation-style requests | baseline without retrieval **2/7** correct top result → with RAG **7/7** |
-| Confidence calibration | answers not flagged average **0.97**; flagged answers average **0.53** |
+| Confidence calibration | answers not flagged average **0.96**; flagged answers average **0.29** |
 | Consistency | identical output across 5 repeated runs, and across 3 processes with different `PYTHONHASHSEED` |
 
 Human evaluation of untuned inputs (probing done after the harness first passed):
@@ -35,6 +35,12 @@ Human evaluation of untuned inputs (probing done after the harness first passed)
 |---|---|---|---|
 | "relaxing music but not jazz" | no jazz in top 3 | **Fail**: jazz #1 at confidence 1.00 | Pass |
 | "I hate rock, give me something to work out to" | workout songs, no rock | **Fail**: parsed genre=rock, retrieved *coding* card | Pass |
+| "anything but jazz" | no jazz | **Fail**: jazz #1 at confidence 1.00 | Pass: no jazz, flagged as exclusion-only |
+| "not loud music" | no loud songs | **Fail**: Storm Runner at confidence 0.99 | Pass: energy capped at 0.60, flagged |
+| "not happy" | no happy songs | **Fail**: happy songs at confidence 1.00 | Pass |
+| "pump me up for the gym but no pop" | no pop anywhere in the list | **Fail**: Gym Hero #2, latin pop #4 | Pass |
+| "I am late for my dentist appointment" | refuse to guess | **Fail**: study music at confidence 0.95 | Pass: refused |
+| "sleep then gym" | notice the contradiction | **Fail**: ambient mixed with rock, unflagged | Pass: follows one card, flagged |
 | "something to dance to at my cousin's wedding" | upbeat danceable pop | Pass | Pass |
 | "sad songs for a road trip" | sad *and* driving | **Fail**: sadness dropped (the night-drive card dominates) | Still fails (known limitation) |
 | "high energy lofi" | flag the conflict | Pass: relaxed + flagged | Pass |
@@ -48,7 +54,9 @@ Human evaluation of untuned inputs (probing done after the harness first passed)
 - **Keyword retrieval has no synonyms.** "Bummed" won't match "sad", and non-English requests are refused. It fails safe, but it isn't helpful.
 - **Multi-intent requests collapse to one intent.** A second card is only blended in if it scores at least 60% of the best card, so "sad songs for a road trip" loses the sadness.
 - **Confidence is a heuristic, not a probability.** It is `fit × evidence − 0.15 if relaxed`. A one-word request like "pop" scores 1.00 because every pop song fits "pop" perfectly, which is not the same as the user being satisfied.
-- **Negation handling is narrow.** It covers genres only ("not jazz"), not moods ("not sad") or features ("not too loud").
+- **Negation is rule-based.** It covers genres, moods and features across many phrasings ("anything but jazz", "not too loud", "I don't want anything acoustic"), but it is a list of patterns, not language understanding. A comma ends a rejection, so "no jazz, rock, or pop" rejects only jazz, and "and" extends one, so "no jazz and calm" also rejects calm.
+- **Opposite contexts follow one card.** "Sleep then gym" follows the stronger match and flags the other instead of trying to serve both. The check is also blunt: "dinner with friends" is flagged because its two cards differ, even though the picks are reasonable.
+- **Off-topic detection is word counting.** A request is refused if fewer than half its words appear in the knowledge base. An off-topic request made of known words ("the night of the concert was late") still gets an answer.
 
 ## 5. Misuse and prevention
 
@@ -61,7 +69,8 @@ The realistic misuse surface for a music recommender is small, but the same patt
 
 ## 6. What surprised me while testing reliability
 
-- **My first test suite proved nothing.** It passed 17/17 because I wrote the cases after seeing the outputs. Ten minutes of throwing *unscripted* requests at the system found the worst bug in the project: "not jazz" produced jazz **at confidence 1.00**. Retrieval made it worse, because the word "jazz" pulled in the jazz card. The fix needed two layers: an avoid list in scoring, and stripping negated genres from the retrieval query.
+- **My first test suite proved nothing.** It passed 17/17 because I wrote the cases after seeing the outputs. Ten minutes of throwing *unscripted* requests at the system found the worst bug in the project: "not jazz" produced jazz **at confidence 1.00**. Retrieval made it worse, because the word "jazz" pulled in the jazz card. The fix needed two layers: excluding rejected songs from ranking, and stripping rejected phrases from the retrieval query.
+- **My negation fix passed its tests and was still wrong.** A later code review found that "not jazz" was fixed but "anything but jazz" was not, because I had fixed the one phrasing I tested. The regression case held while the bug class stayed open. The real fix was to stop matching phrases per genre and work out which part of a sentence is being rejected, once, for genres, moods and features alike.
 - **A bug that only appears across processes.** The conflict message listed features in a set's iteration order, which changes with Python's per-process hash randomization. My "run it 5 times" consistency check ran in one process, so it could never see it. I only noticed because two terminal runs differed. That changed how I think about "deterministic".
 - **Confidence was easier to compute than to make meaningful.** Raw "fit" was ~1.0 for almost everything. Adding an *evidence* term (how strongly retrieval matched) is what made vague requests like "something upbeat" drop to 0.60 and get flagged.
 

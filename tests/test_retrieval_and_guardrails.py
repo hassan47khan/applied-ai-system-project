@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from src.guardrails import MAX_QUERY_CHARS, sanitize_query
-from src.profile import build_profile, parse_explicit, strip_negated_genres
+from src.profile import build_profile, parse_explicit, strip_negated
 from src.retrieval import Retriever, load_cards, parse_card, tokenize
 
 GENRES = ["pop", "lofi", "rock", "ambient", "jazz", "synthwave", "indie pop",
@@ -68,8 +68,8 @@ def test_lofi_spelling_variants():
 
 def test_negation_creates_avoid_not_genre():
     p = parse_explicit("relaxing but not jazz", GENRES, MOODS)
-    assert p.genres == [] and p.avoid_genres == ["jazz"]
-    assert "jazz" not in strip_negated_genres("relaxing but not jazz", GENRES)
+    assert p.genres == [] and set(p.avoid_genres) == {"jazz", "classic jazz"}
+    assert "jazz" not in strip_negated("relaxing but not jazz")
 
 
 def test_negated_acoustic_is_low_acousticness():

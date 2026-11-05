@@ -11,25 +11,33 @@ VibeFinder 2.0 evaluation
  7  angry venting                        behaviour    1.00     no  PASS
  8  negation: 'not jazz'                 behaviour    0.83     no  PASS
  9  negation + 'work out'                behaviour    0.94     no  PASS
-10  contradiction: lofi but max energy   behaviour    0.64    yes  PASS
-11  impossible combo (adversarial)       behaviour    0.35    yes  PASS
-12  vague request                        behaviour    0.60    yes  PASS
-13  gibberish                            behaviour    0.00    yes  PASS
-14  empty input                          robustness   0.00    yes  PASS
-15  whitespace only                      robustness   0.00    yes  PASS
-16  non-text input                       robustness   0.00    yes  PASS
-17  oversized input (5000 chars)         robustness   1.00     no  PASS
-18  instruction-override text            robustness   0.00    yes  PASS
-19  consistency (5 repeated runs)        reliability               PASS
+10  negation: 'anything but jazz'        behaviour    0.00    yes  PASS
+11  negation: curly apostrophe           behaviour    0.83     no  PASS
+12  negation: list of genres             behaviour    0.87     no  PASS
+13  negated feature: 'not loud'          behaviour    0.00    yes  PASS
+14  negated mood: 'not happy'            behaviour    0.00    yes  PASS
+15  rejected genre at any rank           behaviour    1.00     no  PASS
+16  exclusion only                       behaviour    0.00    yes  PASS
+17  partial genre name                   behaviour    1.00     no  PASS
+18  off-topic with one known word        behaviour    0.00    yes  PASS
+19  contradictory contexts               behaviour    0.75    yes  PASS
+20  contradiction: lofi but max energy   behaviour    0.64    yes  PASS
+21  impossible combo (adversarial)       behaviour    0.34    yes  PASS
+22  vague request                        behaviour    0.60    yes  PASS
+23  gibberish                            behaviour    0.00    yes  PASS
+24  empty input                          robustness   0.00    yes  PASS
+25  whitespace only                      robustness   0.00    yes  PASS
+26  non-text input                       robustness   0.00    yes  PASS
+27  oversized input (5000 chars)         robustness   1.00     no  PASS
+28  instruction-override text            robustness   0.00    yes  PASS
+29  consistency (5 repeated runs)        reliability               PASS
 --------------------------------------------------------------------------------------
-Checks passed: 19/19
+Checks passed: 29/29
 
 Retrieval lift (requests that describe a situation, not a genre)
   without retrieval (baseline): 2/7 correct top result
   with retrieval (RAG)        : 7/7 correct top result
 
 Confidence calibration
-  mean confidence, answers NOT flagged: 0.97 (n=10)
-  mean confidence, answers flagged     : 0.53 (n=3)
-
-Traces written to logs/agent_traces.md
+  mean confidence, answers NOT flagged: 0.96 (n=14)
+  mean confidence, answers flagged     : 0.29 (n=8)
