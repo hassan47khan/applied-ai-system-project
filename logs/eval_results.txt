@@ -1,0 +1,35 @@
+VibeFinder 2.0 evaluation
+======================================================================================
+ #  case                                 kind         conf review  result
+--------------------------------------------------------------------------------------
+ 1  study (calm, late night)             behaviour    0.99     no  PASS
+ 2  gym workout                          behaviour    1.00     no  PASS
+ 3  romantic dinner                      behaviour    1.00     no  PASS
+ 4  rainy and sad                        behaviour    0.99     no  PASS
+ 5  night drive                          behaviour    1.00     no  PASS
+ 6  beach party                          behaviour    1.00     no  PASS
+ 7  angry venting                        behaviour    1.00     no  PASS
+ 8  negation: 'not jazz'                 behaviour    0.83     no  PASS
+ 9  negation + 'work out'                behaviour    0.94     no  PASS
+10  contradiction: lofi but max energy   behaviour    0.64    yes  PASS
+11  impossible combo (adversarial)       behaviour    0.35    yes  PASS
+12  vague request                        behaviour    0.60    yes  PASS
+13  gibberish                            behaviour    0.00    yes  PASS
+14  empty input                          robustness   0.00    yes  PASS
+15  whitespace only                      robustness   0.00    yes  PASS
+16  non-text input                       robustness   0.00    yes  PASS
+17  oversized input (5000 chars)         robustness   1.00     no  PASS
+18  instruction-override text            robustness   0.00    yes  PASS
+19  consistency (5 repeated runs)        reliability               PASS
+--------------------------------------------------------------------------------------
+Checks passed: 19/19
+
+Retrieval lift (requests that describe a situation, not a genre)
+  without retrieval (baseline): 2/7 correct top result
+  with retrieval (RAG)        : 7/7 correct top result
+
+Confidence calibration
+  mean confidence, answers NOT flagged: 0.97 (n=10)
+  mean confidence, answers flagged     : 0.53 (n=3)
+
+Traces written to logs/agent_traces.md

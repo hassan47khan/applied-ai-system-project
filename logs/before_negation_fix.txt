@@ -1,0 +1,69 @@
+$ python -m src.main "relaxing music but not jazz"   # commit 39e379b, before the fix
+====================================================================
+  VibeFinder 2.0
+  Request: "relaxing music but not jazz"
+====================================================================
+  Retrieved context : dinner-cafe-jazz (0.20), sleep-wind-down (0.14)
+  Search profile    : genre=jazz, context genres~jazz/classic
+                      jazz/indie folk/ambient/ambient
+                      electronic/lofi, context moods~relaxed/chill,
+                      energy=0.15-0.50, danceability=0.25-0.60,
+                      acousticness=0.70-0.95
+  Confidence        : 1.00   Needs human review: no
+
+#1  Coffee Shop Stories - Slow Stereo  [jazz / relaxed]  score 7.25 (fit 1.00)
+     Coffee Shop Stories fits because genre match: jazz (+1.50);
+     genre fits the context: jazz (+0.75); mood fits the context:
+     relaxed (+0.50). Context (Dinner, cafes and jazz): Dinners and
+     cafe settings call for relaxed, warm acoustic sounds that sit
+     comfortably under conversation.
+
+#2  Blue Note Avenue - Marcus Hollow Trio  [classic jazz / relaxed]  score 6.50 (fit 0.90)
+     Blue Note Avenue fits because related genre: classic jazz
+     (+0.75); genre fits the context: classic jazz (+0.75); mood
+     fits the context: relaxed (+0.50). Context (Dinner, cafes and
+     jazz): Dinners and cafe settings call for relaxed, warm
+     acoustic sounds that sit comfortably under conversation.
+
+#3  Dust and Vinyl - The Lamplighters  [indie folk / relaxed]  score 5.75 (fit 0.79)
+     Dust and Vinyl fits because genre fits the context: indie folk
+     (+0.75); mood fits the context: relaxed (+0.50); energy 0.39
+     fits target 0.15-0.50 (+1.50). Context (Dinner, cafes and
+     jazz): Dinners and cafe settings call for relaxed, warm
+     acoustic sounds that sit comfortably under conversation.
+====================================================================
+
+$ python -m src.main "I hate rock, give me something to work out to"   # commit 39e379b, before the fix
+====================================================================
+  VibeFinder 2.0
+  Request: "I hate rock, give me something to work out to"
+====================================================================
+  Retrieved context : coding-deep-work (0.30)
+  Search profile    : genre=rock, context genres~lofi/ambient
+                      electronic, context moods~focused,
+                      energy=0.25-0.45, danceability=0.30-0.62,
+                      acousticness=0.65-0.80
+  Confidence        : 0.79   Needs human review: no
+
+#1  Focus Flow - LoRoom  [lofi / focused]  score 5.75 (fit 0.79)
+     Focus Flow fits because genre fits the context: lofi (+0.75);
+     mood fits the context: focused (+0.50); energy 0.40 fits target
+     0.25-0.45 (+1.50). Context (Coding and deep work): Deep work
+     calls for a steady, unobtrusive groove that keeps rhythm in the
+     background.
+
+#2  Quantum Lullaby - Null Signal  [ambient electronic / focused]  score 5.75 (fit 0.79)
+     Quantum Lullaby fits because genre fits the context: ambient
+     electronic (+0.75); mood fits the context: focused (+0.50);
+     energy 0.26 fits target 0.25-0.45 (+1.50). Context (Coding and
+     deep work): Deep work calls for a steady, unobtrusive groove
+     that keeps rhythm in the background.
+
+#3  Glacier Drift - Aural Mist  [ambient electronic / chill]  score 5.16 (fit 0.71)
+     Glacier Drift fits because genre fits the context: ambient
+     electronic (+0.75); energy 0.22 fits target 0.25-0.45 (+1.41);
+     danceability 0.33 fits target 0.30-0.62 (+1.50). Context
+     (Coding and deep work): Deep work calls for a steady,
+     unobtrusive groove that keeps rhythm in the background.
+====================================================================
+
