@@ -54,10 +54,11 @@ _NEGATION_CUE = re.compile(
 
 # What ends a rejection: punctuation, or a word that starts a new thought or a context
 # ("no pop for the gym" rejects pop, not the gym). "and"/"or" are absent on purpose, so
-# "not jazz or rock" and "I hate jazz and rock" reject both. Checked after the first word
-# of the scope, so "don't play rock" and "not for the gym" still count.
+# "not jazz or rock" and "I hate jazz and rock" reject both, and a comma that continues a
+# list ("no jazz, rock, or pop") doesn't end anything. Checked after the first word of the
+# scope, so "don't play rock" and "not for the gym" still count.
 _SCOPE_END = re.compile(
-    r"[,.;:!?()]|\b(?:but|however|though|although|yet|instead|rather|just|only|because|since|"
+    r",(?! or\b)(?! [\w' -]+,? or\b)|[.;:!?()]|\b(?:but|however|though|although|yet|instead|rather|just|only|because|since|"
     r"so|then|while|when|during|for|to|at|in|on|with|i|we|give|gimme|play|make|want|need|"
     r"something|maybe|please|pick|love|like|prefer|enjoy)\b"
 )

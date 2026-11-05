@@ -42,7 +42,10 @@ def test_every_way_of_rejecting_a_genre(text):
     assert p.genres == [] and "jazz" in p.avoid_genres
 
 
-@pytest.mark.parametrize("text", ["not jazz or rock", "I hate jazz and rock", "neither jazz nor rock"])
+@pytest.mark.parametrize("text", [
+    "not jazz or rock", "I hate jazz and rock", "neither jazz nor rock",
+    "no jazz, rock, or pop", "no jazz, rock or pop",
+])
 def test_rejection_covers_a_list(text):
     p = parse(text)
     assert p.genres == [] and {"jazz", "rock"} <= set(p.avoid_genres)
@@ -62,10 +65,11 @@ def test_phrases_that_only_look_negative_keep_the_genre(text, genre):
     ("no jazz, rock please", "rock", "jazz"),
     ("I don't want jazz, I want rock", "rock", "jazz"),
     ("I hate jazz and love rock", "rock", "jazz"),
+    ("no jazz, give me rock or pop", "rock", "jazz"),
 ])
 def test_rejection_stops_at_the_end_of_its_clause(text, wanted, rejected):
     p = parse(text)
-    assert p.genres == [wanted] and rejected in p.avoid_genres
+    assert wanted in p.genres and rejected in p.avoid_genres
 
 
 def test_rejection_does_not_swallow_the_context():

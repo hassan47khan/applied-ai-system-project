@@ -38,7 +38,7 @@ request -> guardrails -> retriever (knowledge base) -> planner/profile -> [act -
 | Scorer | `src/recommender.py` | Module 3 scorer, extended: range targets, mismatch penalties, related-genre credit, avoid list |
 | Agent | `src/agent.py` | Plan, retrieve, act, verify, revise, decide loop; confidence; human-review flag; full trace |
 | Explainer | `src/llm.py` | Grounded template explanations; optional Gemini with validation and automatic fallback |
-| Evaluation | `src/evaluate.py`, `tests/` | 29-check harness with RAG-vs-baseline lift; 129 pytest tests |
+| Evaluation | `src/evaluate.py`, `tests/` | 29-check harness with RAG-vs-baseline lift; 132 pytest tests |
 
 The human stays in the loop through the `needs_review` flag and the clarifying message: the agent never silently overrides what you asked for.
 
@@ -63,7 +63,7 @@ python -m src.main --trace "lofi at maximum energy, not acoustic"   # show the a
 python -m src.main --demo            # three built-in examples
 python -m src.main --interactive     # keep asking until 'quit'
 python -m src.main --json "road trip at night"
-python -m pytest                     # 129 tests
+python -m pytest                     # 132 tests
 python -m src.evaluate               # evaluation harness (add --traces logs/agent_traces.md)
 ```
 
@@ -242,13 +242,13 @@ Confidence calibration
   mean confidence, answers flagged     : 0.29 (n=8)
 ```
 
-**Testing summary.** 29/29 harness checks and 129/129 pytest tests pass ([`logs/pytest_results.txt`](logs/pytest_results.txt)). Retrieval raised top-1 accuracy on situation-style requests from **2/7 to 7/7**. Answers the agent was willing to stand behind averaged **0.96** confidence; answers it flagged averaged **0.29**.
+**Testing summary.** 29/29 harness checks and 132/132 pytest tests pass ([`logs/pytest_results.txt`](logs/pytest_results.txt)). Retrieval raised top-1 accuracy on situation-style requests from **2/7 to 7/7**. Answers the agent was willing to stand behind averaged **0.96** confidence; answers it flagged averaged **0.29**.
 
 **What didn't work at first, and what I learned:**
 - My first harness run was 17/17, but I had written those cases *after* watching the system run, so they mostly confirmed what I already knew. Probing with inputs I hadn't tuned for exposed two real bugs: "**not** jazz" returned jazz at confidence 1.00, and "work out" retrieved the *coding* card because it was tokenized as "work". Both are fixed and now kept as regression cases (#8, #9).
 - That negation fix was itself too narrow. A later code review showed that "anything but jazz", "I don’t want jazz" (curly apostrophe), "not loud" and "not happy" were all still read as requests for the thing rejected, usually at confidence 1.00. A rejected genre was also only a score penalty, so "gym but no pop" still returned Gym Hero at #2. Rejection is now parsed per clause in one place, and rejected genres and moods are removed before ranking. The same review found three places where the agent claimed certainty it hadn't earned: one stray word matching a card ("I am late for my dentist appointment" returned study music at 0.95), opposite cards merging into a range everything fit ("sleep then gym"), and requests that only exclude being refused outright. These are regression cases #10–#19.
 - The conflict message listed features in a different order on different runs. It iterated a Python `set`, whose order changes with hash randomization between processes. The in-process consistency check could not catch this, so `test_output_identical_across_processes` now runs the CLI under three different `PYTHONHASHSEED` values.
-- Known failures that are **not** fixed, and are documented in the model card: multi-intent requests ("sad songs for a road trip") follow the strongest card and drop the sadness; negation is rule-based, so unusual phrasings can still slip through ("no jazz, rock, or pop" rejects only jazz, because the comma ends the rejection); non-English input is refused; and confidence measures fit to the stated request, not whether you'll actually like the songs.
+- Known failures that are **not** fixed, and are documented in the model card: multi-intent requests ("sad songs for a road trip") follow the strongest card and drop the sadness; negation is rule-based, so unusual phrasings can still go wrong ("no jazz and calm" also rejects calm); non-English input is refused; and confidence measures fit to the stated request, not whether you'll actually like the songs.
 
 ## Design decisions and trade-offs
 
@@ -269,7 +269,7 @@ The biggest lesson was that a **reliable AI system is mostly made of the parts t
 ```
 src/            agent, retrieval, profile, scoring, guardrails, llm, CLI, evaluate
 data/           songs.csv (18 tracks) + knowledge/ (13 context cards)
-tests/          129 pytest tests
+tests/          132 pytest tests
 diagrams/       architecture.md (Mermaid source)
 logs/           eval_results.txt, agent_traces.md, sample_runs.txt, pytest_results.txt, before_negation_fix.txt
 assets/         images (optional)

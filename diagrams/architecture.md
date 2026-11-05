@@ -39,7 +39,7 @@ flowchart TD
     H -. "refined request" .-> U
 
     subgraph TESTING["Reliability testing"]
-        T1[pytest: 129 unit/behaviour tests]
+        T1[pytest: 132 unit/behaviour tests]
         T2[src/evaluate.py: 29 checks,<br/>RAG vs no-RAG baseline,<br/>confidence calibration]
         T3[(logs/: traces, eval results,<br/>vibefinder.log)]
     end

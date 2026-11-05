@@ -24,7 +24,7 @@
 | Evaluation | Result |
 |---|---|
 | Evaluation harness (`python -m src.evaluate`) | **29/29 checks pass**: 23 behaviour, 5 robustness, 1 consistency |
-| Unit and behaviour tests (`python -m pytest`) | **129/129 pass** |
+| Unit and behaviour tests (`python -m pytest`) | **132/132 pass** |
 | Retrieval lift on situation-style requests | baseline without retrieval **2/7** correct top result → with RAG **7/7** |
 | Confidence calibration | answers not flagged average **0.96**; flagged answers average **0.29** |
 | Consistency | identical output across 5 repeated runs, and across 3 processes with different `PYTHONHASHSEED` |
@@ -54,7 +54,7 @@ Human evaluation of untuned inputs (probing done after the harness first passed)
 - **Keyword retrieval has no synonyms.** "Bummed" won't match "sad", and non-English requests are refused. It fails safe, but it isn't helpful.
 - **Multi-intent requests collapse to one intent.** A second card is only blended in if it scores at least 60% of the best card, so "sad songs for a road trip" loses the sadness.
 - **Confidence is a heuristic, not a probability.** It is `fit × evidence − 0.15 if relaxed`. A one-word request like "pop" scores 1.00 because every pop song fits "pop" perfectly, which is not the same as the user being satisfied.
-- **Negation is rule-based.** It covers genres, moods and features across many phrasings ("anything but jazz", "not too loud", "I don't want anything acoustic"), but it is a list of patterns, not language understanding. A comma ends a rejection, so "no jazz, rock, or pop" rejects only jazz, and "and" extends one, so "no jazz and calm" also rejects calm.
+- **Negation is rule-based.** It covers genres, moods and features across many phrasings ("anything but jazz", "not too loud", "I don't want anything acoustic"), but it is a list of patterns, not language understanding. A comma usually ends a rejection and "and" extends one, so "no jazz and calm" also rejects calm.
 - **Opposite contexts follow one card.** "Sleep then gym" follows the stronger match and flags the other instead of trying to serve both. The check is also blunt: "dinner with friends" is flagged because its two cards differ, even though the picks are reasonable.
 - **Off-topic detection is word counting.** A request is refused if fewer than half its words appear in the knowledge base. An off-topic request made of known words ("the night of the concert was late") still gets an answer.
 
