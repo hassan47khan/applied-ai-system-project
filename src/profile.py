@@ -11,6 +11,7 @@ Explicit numeric targets override the range a card suggests for that feature.
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from .recommender import NUMERIC_ATTRS, Target
@@ -54,19 +55,33 @@ _NEGATION_CUE = re.compile(
 
 # What ends a rejection: punctuation, or a word that starts a new thought or a context
 # ("no pop for the gym" rejects pop, not the gym). "and"/"or" are absent on purpose, so
-# "not jazz or rock" and "I hate jazz and rock" reject both, and a comma that continues a
-# list ("no jazz, rock, or pop") doesn't end anything. Checked after the first word of the
-# scope, so "don't play rock" and "not for the gym" still count.
+# "not jazz or rock" and "I hate jazz and rock" reject both. A comma ends the rejection
+# unless it continues a list of known genres/moods (see _list_continuation). Checked after
+# the first word of the scope, so "don't play rock" and "not for the gym" still count.
 _SCOPE_END = re.compile(
-    r",(?! or\b)(?! [\w' -]+,? or\b)|[.;:!?()]|\b(?:but|however|though|although|yet|instead|rather|just|only|because|since|"
+    r",|[.;:!?()]|\b(?:but|however|though|although|yet|instead|rather|just|only|because|since|"
     r"so|then|while|when|during|for|to|at|in|on|with|i|we|give|gimme|play|make|want|need|"
     r"something|maybe|please|pick|love|like|prefer|enjoy)\b"
 )
 _FIRST_WORD = re.compile(r"[ -]+[\w'-]+")
 
-# (feature, words, target when asked for, target when rejected). Rejecting a word rules out
-# that end of the scale without pretending the user asked for the extreme opposite, so the
-# "not loud" style entries are ranges. First matching rule per feature wins.
+
+@lru_cache(maxsize=8)
+def _list_continuation(terms: Tuple[str, ...]) -> Optional["re.Pattern[str]"]:
+    """At a comma, match the rest of a list made only of known terms and closed by
+    or/and/nor. ", rock, or pop" and ", rock or pop" continue "no jazz"; ", upbeat rock
+    or pop" and ", rock please" don't, because they say what the user does want."""
+    if not terms:
+        return None
+    alternatives = "|".join(re.escape(t) for t in sorted(terms, key=lambda t: (-len(t), t)))
+    item = rf"\b(?:{alternatives})\b"
+    return re.compile(rf",\s*{item}(?:\s*,\s*{item})*\s*,?\s+(?:or|and|nor)\s+{item}")
+
+
+# (feature, words, target when asked for, target when rejected). Rejecting an energy word
+# rules out that end of the scale without pretending the user asked for the opposite
+# extreme, so those entries are ranges. Rejecting "acoustic" or "dance" is taken as a firm
+# "the opposite, please" and gets a point target. First matching rule per feature wins.
 _NUMERIC_LEXICON: List[Tuple[str, re.Pattern, Target, Target]] = [
     ("acousticness", re.compile(r"\b(?:acoustic|unplugged)\b"), 0.85, 0.10),
     ("acousticness", re.compile(r"\b(?:electronic|synthetic|digital)\b"), 0.10, (0.40, 1.00)),
@@ -76,6 +91,18 @@ _NUMERIC_LEXICON: List[Tuple[str, re.Pattern, Target, Target]] = [
                           r"|\bloud\b|\bpumped\b"), 0.92, (0.00, 0.60)),
     ("energy", re.compile(r"\b(?:low|lowest|minimal)[ -]energy\b"
                           r"|\bcalm\b|\bmellow\b|\bquiet\b|\bgentle\b|\bsoft\b"), 0.25, (0.50, 1.00)),
+]
+
+# "less acoustic" asks for a direction, so it is a preference, not a rejection. These
+# phrases are taken out before negation is split ("less" is otherwise a negation cue), so
+# the feature word can't also count as a request or a mood ("less intense").
+_LESS_LEXICON: List[Tuple[str, re.Pattern, Target]] = [
+    ("acousticness", re.compile(r"\bless (?:acoustic|unplugged)\b"), (0.00, 0.50)),
+    ("acousticness", re.compile(r"\bless (?:electronic|synthetic|digital)\b"), (0.50, 1.00)),
+    ("danceability", re.compile(r"\bless (?:danceable|dance|groovy)\b"), (0.00, 0.55)),
+    ("energy", re.compile(r"\bless (?:loud|pumped|intense|energetic|energy|high[ -]energy)\b"),
+     (0.00, 0.60)),
+    ("energy", re.compile(r"\bless (?:calm|mellow|quiet|gentle|soft|low[ -]energy)\b"), (0.50, 1.00)),
 ]
 
 
@@ -171,8 +198,12 @@ def _normalise(text: str) -> str:
     return working
 
 
-def _split_negated(text: str) -> Tuple[str, str]:
-    """Split normalised text into (what is wanted, what is rejected)."""
+def _split_negated(text: str, list_terms: Tuple[str, ...] = ()) -> Tuple[str, str]:
+    """Split normalised text into (what is wanted, what is rejected).
+
+    `list_terms` (lower-case genre/mood words) lets a rejection run on across a comma-separated
+    list of them ("no jazz, rock, or pop"). Without them every comma ends a rejection."""
+    continuation = _list_continuation(tuple(list_terms))
     kept: List[str] = []
     rejected: List[str] = []
     pos = 0
@@ -186,6 +217,11 @@ def _split_negated(text: str) -> Tuple[str, str]:
             pos = cue.end()
             continue
         end = _SCOPE_END.search(text, first.end())
+        while end is not None and end.group() == "," and continuation is not None:
+            listed = continuation.match(text, end.start())
+            if listed is None:
+                break
+            end = _SCOPE_END.search(text, listed.end())
         stop = end.start() if end else len(text)
         kept.append(text[pos:cue.start()])
         rejected.append(text[first.start():stop])
@@ -194,9 +230,15 @@ def _split_negated(text: str) -> Tuple[str, str]:
     return " ".join(kept), " ".join(rejected)
 
 
-def strip_negated(text: str) -> str:
-    """Remove rejected phrases so something rejected can't pull in its own context card."""
-    return re.sub(r"\s+", " ", _split_negated(_normalise(text))[0]).strip()
+def strip_negated(text: str, list_terms: Sequence[str] = ()) -> str:
+    """Remove rejected phrases so something rejected can't pull in its own context card.
+    Pass the same `list_terms` parse_explicit uses, so both agree on where a rejection ends."""
+    return re.sub(r"\s+", " ", _split_negated(_normalise(text), tuple(list_terms))[0]).strip()
+
+
+def list_terms(genre_vocab: Sequence[str], mood_vocab: Sequence[str]) -> Tuple[str, ...]:
+    """Genre and mood words that can make up a rejected list ("no jazz, rock, or pop")."""
+    return tuple(sorted(set(_genre_terms(genre_vocab)) | {m.lower() for m in mood_vocab}))
 
 
 def _genre_terms(genre_vocab: Sequence[str]) -> List[str]:
@@ -239,7 +281,13 @@ def _apply_numeric(profile: Profile, text: str, rejected: bool) -> None:
 
 def parse_explicit(text: str, genre_vocab: Sequence[str], mood_vocab: Sequence[str]) -> Profile:
     """Pull catalog genres/moods and numeric hints straight out of the text."""
-    wanted, rejected = _split_negated(_normalise(text))
+    normalised = _normalise(text)
+    leaning: List[Tuple[str, Target]] = []          # "less acoustic" and friends
+    for attr, pattern, target in _LESS_LEXICON:
+        if pattern.search(normalised):
+            leaning.append((attr, target))
+            normalised = pattern.sub(" ", normalised)
+    wanted, rejected = _split_negated(normalised, list_terms(genre_vocab, mood_vocab))
 
     profile = Profile()
     profile.avoid_genres, rejected = _extract_genres(rejected, genre_vocab, rejecting=True)
@@ -253,7 +301,12 @@ def parse_explicit(text: str, genre_vocab: Sequence[str], mood_vocab: Sequence[s
     profile.moods = [m for m in moods_in(wanted) if m not in profile.avoid_moods]
 
     # What the user asked for outranks what they ruled out ("calm, not loud" is 0.25).
+    # "Less X" is a wanted direction, so it sits between the two.
     _apply_numeric(profile, wanted, rejected=False)
+    for attr, target in leaning:
+        if attr not in profile.explicit_numeric:
+            profile.targets[attr] = target
+            profile.explicit_numeric.add(attr)
     _apply_numeric(profile, rejected, rejected=True)
     return profile
 

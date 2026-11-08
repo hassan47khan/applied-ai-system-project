@@ -24,7 +24,7 @@
 | Evaluation | Result |
 |---|---|
 | Evaluation harness (`python -m src.evaluate`) | **29/29 checks pass**: 23 behaviour, 5 robustness, 1 consistency |
-| Unit and behaviour tests (`python -m pytest`) | **141/141 pass** |
+| Unit and behaviour tests (`python -m pytest`) | **156/156 pass** |
 | Retrieval lift on situation-style requests | baseline without retrieval **2/7** correct top result → with RAG **7/7** |
 | Confidence calibration | answers not flagged average **0.96**; flagged answers average **0.29** |
 | Consistency | identical output across 5 repeated runs, and across 3 processes with different `PYTHONHASHSEED` |
@@ -46,6 +46,10 @@ Human evaluation of untuned inputs (probing done after the harness first passed)
 | "high energy lofi" | flag the conflict | Pass: relaxed + flagged | Pass |
 | "música para estudiar" | handle gracefully | Pass: refused, no crash | Pass (but not *useful*) |
 | "I'm bored" | handle gracefully | Pass: refuses to guess | Pass |
+| "no jazz, upbeat rock or pop" | rock or pop, no jazz | **Fail**: rock and pop rejected too, synthwave #1 at confidence 0.00 | Pass: pop #1, jazz excluded |
+| "skip the jazz, chill lofi or ambient" | chill lofi/ambient | **Fail**: lofi, ambient and "chill" all rejected | Pass: lofi #1 |
+| "I want pop, not indie pop" | pop, no indie pop | **Fail**: pop songs penalized as "avoided genre", jazz at #3, confidence 0.50 | Pass: pop #1 at 1.00 |
+| "less acoustic please" | lower acousticness | **Fail**: treated as exclusion-only, confidence 0.00 | Pass: acousticness 0.00–0.50, not flagged |
 
 ## 4. Explanation specialization: baseline vs. constrained output
 
@@ -99,7 +103,7 @@ generated text (see section 6).
 - **Keyword retrieval has no synonyms.** "Bummed" won't match "sad", and non-English requests are refused. It fails safe, but it isn't helpful.
 - **Multi-intent requests collapse to one intent.** A second card is only blended in if it scores at least 60% of the best card, so "sad songs for a road trip" loses the sadness.
 - **Confidence is a heuristic, not a probability.** It is `fit × evidence − 0.15 if relaxed`. A one-word request like "pop" scores 1.00 because every pop song fits "pop" perfectly, which is not the same as the user being satisfied.
-- **Negation is rule-based.** It covers genres, moods and features across many phrasings ("anything but jazz", "not too loud", "I don't want anything acoustic"), but it is a list of patterns, not language understanding. A comma usually ends a rejection and "and" extends one, so "no jazz and calm" also rejects calm.
+- **Negation is rule-based.** It covers genres, moods and features across many phrasings ("anything but jazz", "not too loud", "I don't want anything acoustic"), but it is a list of patterns, not language understanding. A comma ends a rejection unless it continues a list of known genres and moods closed by "or"/"and" ("no jazz, rock, or pop"); "and" always extends one, so "no jazz and calm" also rejects calm. "No jazz, rock or pop" is genuinely ambiguous and is read as a list. "Less acoustic" / "less loud" are read as a lean in one direction (a range), not a rejection.
 - **Opposite contexts follow one card.** "Sleep then gym" follows the stronger match and flags the other instead of trying to serve both. The check is also blunt: "dinner with friends" is flagged because its two cards differ, even though the picks are reasonable.
 - **Off-topic detection is word counting.** A request is refused if fewer than half its words appear in the knowledge base. An off-topic request made of known words ("the night of the concert was late") still gets an answer.
 

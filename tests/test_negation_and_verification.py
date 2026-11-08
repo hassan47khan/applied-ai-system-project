@@ -11,7 +11,7 @@ import pytest
 from src.agent import VibeFinderAgent
 from src.main import main
 from src.profile import parse_explicit, strip_negated
-from src.recommender import load_songs
+from src.recommender import load_songs, score_song
 from src.retrieval import Retriever, load_cards
 
 GENRES = ["pop", "lofi", "rock", "ambient", "jazz", "synthwave", "indie pop",
@@ -265,3 +265,69 @@ def test_character_the_console_cannot_encode_does_not_crash():
                           capture_output=True, env=env)
     assert proc.returncode == 0, proc.stderr
     assert b"VibeFinder" in proc.stdout
+
+
+# ---- second review: a rejection followed by a request after a comma ----------------
+@pytest.mark.parametrize("text, wanted, rejected", [
+    ("no jazz, upbeat rock or pop", {"rock", "pop"}, {"jazz"}),
+    ("skip the jazz, chill lofi or ambient", {"lofi", "ambient"}, {"jazz"}),
+    ("not jazz, rock or pop for the gym", set(), {"jazz", "rock", "pop"}),
+])
+def test_comma_continues_a_rejection_only_across_a_real_list(text, wanted, rejected):
+    p = parse(text)
+    assert wanted <= set(p.genres) and rejected <= set(p.avoid_genres)
+    assert not wanted & set(p.avoid_genres)
+
+
+def test_comma_list_needs_vocabulary_or_it_ends_the_rejection():
+    # strip_negated without terms can't tell a list from a new request, so it stops early.
+    assert "rock" in strip_negated("no jazz, upbeat rock or pop")
+
+
+def test_rejection_then_request_gives_the_request(agent):
+    r = agent.run("skip the jazz, chill lofi or ambient")
+    assert r.recommendations[0].song["genre"] in {"lofi", "ambient", "ambient electronic"}
+    assert parse("skip the jazz, chill lofi or ambient").moods == ["chill"]
+    assert not {"jazz", "classic jazz"} & {rec.song["genre"] for rec in r.recommendations}
+
+
+# ---- second review: avoiding a genre must not penalise a related one ---------------
+def test_avoid_penalty_is_exact_match_only():
+    pop = {"genre": "pop", "mood": "happy", "energy": 0.5, "danceability": 0.5, "acousticness": 0.5}
+    score, reasons = score_song({"genres": ["pop"], "avoid_genres": ["indie pop"]}, pop)
+    assert score == 1.5 and not any("avoided" in r for r in reasons)
+
+
+def test_wanting_pop_but_not_indie_pop(agent):
+    r = agent.run("I want pop, not indie pop")
+    assert r.recommendations[0].song["genre"] == "pop"
+    assert not any("avoided" in reason for rec in r.recommendations for reason in rec.reasons)
+
+
+# ---- second review: "less X" is a preference, not a rejection ------------------------
+@pytest.mark.parametrize("text, attr, check", [
+    ("less acoustic please", "acousticness", lambda t: t == (0.00, 0.50)),
+    ("a bit less electronic", "acousticness", lambda t: t == (0.50, 1.00)),
+    ("less danceable", "danceability", lambda t: t == (0.00, 0.55)),
+    ("less loud", "energy", lambda t: t == (0.00, 0.60)),
+    ("less mellow", "energy", lambda t: t == (0.50, 1.00)),
+])
+def test_less_x_leans_away_without_rejecting(text, attr, check):
+    p = parse(text)
+    assert check(p.targets[attr]) and attr in p.explicit_numeric
+    assert attr not in p.rejected_numeric and p.has_explicit_signal
+
+
+def test_less_intense_is_not_a_request_for_the_intense_mood():
+    p = parse("less intense")
+    assert p.moods == [] and p.avoid_moods == [] and p.targets["energy"] == (0.00, 0.60)
+
+
+def test_less_on_a_genre_still_rejects_it():
+    assert "jazz" in parse("less jazz").avoid_genres
+
+
+def test_less_acoustic_is_a_confident_answer(agent):
+    r = agent.run("less acoustic please")
+    assert "exclusion_only" not in r.issues
+    assert all(rec.song["acousticness"] <= 0.5 for rec in r.recommendations[:3])

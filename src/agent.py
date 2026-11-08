@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .guardrails import sanitize_query
 from .llm import Explainer, TemplateExplainer
-from .profile import Profile, build_profile, strip_negated
+from .profile import Profile, build_profile, list_terms, strip_negated
 from .recommender import (
     NUMERIC_ATTRS, genre_affinity, load_songs, max_score, numeric_distance, rank_songs,
 )
@@ -90,6 +90,7 @@ class VibeFinderAgent:
         self.k = k
         self.genre_vocab = sorted({s["genre"] for s in self.songs})
         self.mood_vocab = sorted({s["mood"] for s in self.songs})
+        self.list_terms = list_terms(self.genre_vocab, self.mood_vocab)
 
     # ------------------------------------------------------------------ run
     def run(self, text) -> AgentResult:
@@ -114,7 +115,7 @@ class VibeFinderAgent:
         step("guardrail", "input accepted" + (f" with warnings: {'; '.join(cleaned.warnings)}" if cleaned.warnings else ""))
 
         # 2. Retrieve + plan ---------------------------------------------------
-        retrieval_text = strip_negated(cleaned.text)
+        retrieval_text = strip_negated(cleaned.text, self.list_terms)
         retrieved = (
             self.retriever.retrieve(retrieval_text, k=3, min_score=RETRIEVAL_MIN_SCORE)
             if self.retriever else []
