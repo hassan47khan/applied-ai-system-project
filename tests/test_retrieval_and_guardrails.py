@@ -77,7 +77,7 @@ def test_lofi_spelling_variants():
 def test_negation_creates_avoid_not_genre():
     p = parse_explicit("relaxing but not jazz", GENRES, MOODS)
     assert p.genres == [] and set(p.avoid_genres) == {"jazz", "classic jazz"}
-    assert "jazz" not in strip_negated("relaxing but not jazz")
+    assert "jazz" not in strip_negated("relaxing but not jazz", GENRES, MOODS)
 
 
 def test_negated_acoustic_is_low_acousticness():
@@ -112,6 +112,16 @@ def test_sanitize_truncates_and_strips_control_chars():
     cleaned = sanitize_query("a\x00b " + "x" * 1000)
     assert cleaned.ok and len(cleaned.text) == MAX_QUERY_CHARS and "\x00" not in cleaned.text
     assert any("truncated" in w for w in cleaned.warnings)
+
+
+def test_truncation_does_not_leave_half_a_word():
+    cleaned = sanitize_query("calm " * 59 + "studying music for tonight")   # 'studying' spans 300
+    assert len(cleaned.text) <= MAX_QUERY_CHARS
+    assert cleaned.text.endswith("calm") and not cleaned.text.endswith(" ")
+
+
+def test_truncation_still_cuts_one_huge_word():
+    assert len(sanitize_query("x" * 1000).text) == MAX_QUERY_CHARS
 
 
 @pytest.mark.parametrize("text", [

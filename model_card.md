@@ -24,10 +24,11 @@
 | Evaluation | Result |
 |---|---|
 | Evaluation harness (`python -m src.evaluate`) | **29/29 checks pass**: 23 behaviour, 5 robustness, 1 consistency |
-| Unit and behaviour tests (`python -m pytest`) | **196/196 pass** |
+| Unit and behaviour tests (`python -m pytest`) | **211/211 pass** |
 | Retrieval lift on situation-style requests | baseline without retrieval **2/7** correct top result → with RAG **7/7** |
 | Confidence calibration | answers not flagged average **0.96**; flagged answers average **0.29** |
 | Consistency | identical output across 5 repeated runs, and across 3 processes with different `PYTHONHASHSEED` |
+| Mutation check (`python tools/mutate.py`) | **47/47** planted bugs caught by the test suite |
 
 Human evaluation of untuned inputs (probing done after the harness first passed):
 
@@ -100,10 +101,10 @@ generated text (see section 6).
 
 - **Tiny, skewed catalog.** 18 songs, 12 genres, most genres with 1–2 tracks, leaning toward chill/acoustic music. Whatever genre you name, the "best" match is often the *only* match. Retrieval cannot recommend what isn't there.
 - **Knowledge-base bias.** The 13 context cards encode *my* assumptions about what music suits an activity (for example, that studying means low-energy lofi, or that workouts mean pop and rock). Someone who studies to metal or works out to jazz is systematically served worse. The cards are also English-only and Western-centric in their genre vocabulary.
-- **Keyword retrieval has no synonyms.** "Bummed" won't match "sad", and non-English requests are refused. It fails safe, but it isn't helpful.
+- **Keyword retrieval has no synonyms.** "Bummed" won't match "sad", and non-English requests are refused. It fails safe, but it isn't helpful. The suffix stripper is also crude and can merge unrelated words ("notes" and "not", "news" and "new"); none of the current cards are affected.
 - **Multi-intent requests collapse to one intent.** A second card is only blended in if it scores at least 60% of the best card, so "sad songs for a road trip" loses the sadness.
 - **Confidence is a heuristic, not a probability.** It is `fit × evidence − 0.15 if relaxed`. A one-word request like "pop" scores 1.00 because every pop song fits "pop" perfectly, which is not the same as the user being satisfied.
-- **Negation is rule-based.** It covers genres, moods and features across many phrasings ("anything but jazz", "not too loud", "I don't want anything acoustic"), but it is a list of patterns, not language understanding. A comma ends a rejection unless it continues a list of known genres and moods closed by "or"/"and" ("no jazz, rock, or pop"); "and" always extends one, so "no jazz and calm" also rejects calm. "No jazz, rock or pop" is genuinely ambiguous and is read as a list. "Less acoustic" / "less loud" are read as a lean in one direction (a range), not a rejection.
+- **Negation is rule-based.** It covers genres, moods and features across many phrasings ("anything but jazz", "not too loud", "I don't want anything acoustic"), but it is a list of patterns, not language understanding. A comma ends a rejection unless it continues a list of known genres and moods closed by "or"/"and" ("no jazz, rock, or pop"); "and" always extends one, so "no jazz and calm" also rejects calm. "No jazz, rock or pop" is genuinely ambiguous and is read as a list. "Less acoustic" / "less loud" are read as a lean in one direction (a range), not a rejection, and "not less acoustic" flips that lean. Idioms such as "nothing less than loud" and "more or less acoustic" are recognised, but double negatives in general are not.
 - **Opposite contexts follow one card.** "Sleep then gym" follows the stronger match and flags the other instead of trying to serve both. The check is also blunt: "dinner with friends" is flagged because its two cards differ, even though the picks are reasonable.
 - **Off-topic detection is word counting.** A request is refused if fewer than half its words appear in the knowledge base. An off-topic request made of known words ("the night of the concert was late") still gets an answer.
 

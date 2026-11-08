@@ -171,7 +171,8 @@ def main(argv=None) -> int:
 
     # Consistency: same request, 5 runs, identical output.
     probe = CASES[0].query
-    runs = [tuple(agent.run(probe).top_titles) + (agent.run(probe).confidence,) for _ in range(5)]
+    repeats = [agent.run(probe) for _ in range(5)]
+    runs = [(tuple(r.top_titles), r.confidence, r.message) for r in repeats]
     consistent = len(set(runs)) == 1
     passed += consistent
     total = len(CASES) + 1

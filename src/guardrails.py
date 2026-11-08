@@ -14,6 +14,7 @@ from typing import List
 log = logging.getLogger("vibefinder.guardrails")
 
 MAX_QUERY_CHARS = 300
+_WORD_BACKOFF = 40           # how far back truncation will look for a word boundary
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _INJECTION_PATTERNS = [
     re.compile(p, re.IGNORECASE)
@@ -33,6 +34,17 @@ class CleanedQuery:
     ok: bool
 
 
+def _truncate(text: str) -> str:
+    """Cut to MAX_QUERY_CHARS without leaving half a word ("stu" from "study") at the end.
+    Backs off to the last space only if it is close; one huge 'word' is simply cut."""
+    cut = text[:MAX_QUERY_CHARS]
+    if text[MAX_QUERY_CHARS] != " ":
+        space = cut.rfind(" ")
+        if space >= MAX_QUERY_CHARS - _WORD_BACKOFF:
+            cut = cut[:space]
+    return cut.rstrip()
+
+
 def sanitize_query(raw) -> CleanedQuery:
     """Validate and normalise a free-text request. Never raises."""
     warnings: List[str] = []
@@ -45,7 +57,7 @@ def sanitize_query(raw) -> CleanedQuery:
         return CleanedQuery("", ["input was empty"], ok=False)
 
     if len(text) > MAX_QUERY_CHARS:
-        text = text[:MAX_QUERY_CHARS]
+        text = _truncate(text)
         warnings.append(f"input truncated to {MAX_QUERY_CHARS} characters")
 
     if any(p.search(text) for p in _INJECTION_PATTERNS):

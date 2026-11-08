@@ -28,6 +28,10 @@ _NORMALISE = [
     (re.compile(r"[‘’ʼ]"), "'"),   # phones and macOS type curly apostrophes
     (re.compile(r"\s+"), " "),
     (re.compile(r"\blo[- ]fi\b"), "lofi"),
+    # Idioms built from negation words that reject nothing: "nothing less than loud" means
+    # loud, and "more or less acoustic" means acoustic.
+    (re.compile(r"\b(?:nothing|no) less than\b"), " "),
+    (re.compile(r"\bmore or less\b"), " "),
 ]
 
 # Words of multi-word genres that also mean something else, so alone they don't name a genre
@@ -95,14 +99,19 @@ _NUMERIC_LEXICON: List[Tuple[str, re.Pattern, Target, Target]] = [
 
 # "less acoustic" asks for a direction, so it is a preference, not a rejection. These
 # phrases are taken out before negation is split ("less" is otherwise a negation cue), so
-# the feature word can't also count as a request or a mood ("less intense").
-_LESS_LEXICON: List[Tuple[str, re.Pattern, Target]] = [
-    ("acousticness", re.compile(r"\bless (?:acoustic|unplugged)\b"), (0.00, 0.50)),
-    ("acousticness", re.compile(r"\bless (?:electronic|synthetic|digital)\b"), (0.50, 1.00)),
-    ("danceability", re.compile(r"\bless (?:danceable|dance|groovy)\b"), (0.00, 0.55)),
-    ("energy", re.compile(r"\bless (?:loud|pumped|intense|energetic|energy|high[ -]energy)\b"),
-     (0.00, 0.60)),
-    ("energy", re.compile(r"\bless (?:calm|mellow|quiet|gentle|soft|low[ -]energy)\b"), (0.50, 1.00)),
+# the feature word can't also count as a request or a mood ("less intense"). A negation
+# right before one flips it: "not less acoustic" means at least as acoustic.
+# (feature, words, target for "less X", target for "not less X")
+_LESS_LEXICON: List[Tuple[str, re.Pattern, Target, Target]] = [
+    (attr, re.compile(r"(?P<neg>\b(?:not|no|never|(?:is|are|was|were|do|does|did|wo|ca)n'?t) )?"
+                      r"\bless (?:" + words + r")\b"), lean, flipped)
+    for attr, words, lean, flipped in (
+        ("acousticness", r"acoustic|unplugged", (0.00, 0.50), (0.50, 1.00)),
+        ("acousticness", r"electronic|synthetic|digital", (0.50, 1.00), (0.00, 0.50)),
+        ("danceability", r"danceable|dance|groovy", (0.00, 0.55), (0.45, 1.00)),
+        ("energy", r"loud|pumped|intense|energetic|energy|high[ -]energy", (0.00, 0.60), (0.40, 1.00)),
+        ("energy", r"calm|mellow|quiet|gentle|soft|low[ -]energy", (0.50, 1.00), (0.00, 0.50)),
+    )
 ]
 
 
@@ -198,12 +207,12 @@ def _normalise(text: str) -> str:
     return working
 
 
-def _split_negated(text: str, list_terms: Tuple[str, ...] = ()) -> Tuple[str, str]:
+def _split_negated(text: str, list_terms: Tuple[str, ...]) -> Tuple[str, str]:
     """Split normalised text into (what is wanted, what is rejected).
 
-    `list_terms` (lower-case genre/mood words) lets a rejection run on across a comma-separated
-    list of them ("no jazz, rock, or pop"). Without them every comma ends a rejection."""
-    continuation = _list_continuation(tuple(list_terms))
+    `list_terms` (lower-case genre/mood words, from _list_terms) lets a rejection run on
+    across a comma-separated list of them ("no jazz, rock, or pop")."""
+    continuation = _list_continuation(list_terms)
     kept: List[str] = []
     rejected: List[str] = []
     pos = 0
@@ -230,15 +239,23 @@ def _split_negated(text: str, list_terms: Tuple[str, ...] = ()) -> Tuple[str, st
     return " ".join(kept), " ".join(rejected)
 
 
-def strip_negated(text: str, list_terms: Sequence[str] = ()) -> str:
+def strip_negated(text: str, genre_vocab: Sequence[str], mood_vocab: Sequence[str]) -> str:
     """Remove rejected phrases so something rejected can't pull in its own context card.
-    Pass the same `list_terms` parse_explicit uses, so both agree on where a rejection ends."""
-    return re.sub(r"\s+", " ", _split_negated(_normalise(text), tuple(list_terms))[0]).strip()
+
+    Takes the same vocabulary as parse_explicit, so the two always agree on where a
+    rejection ends (a comma only continues one across a list of known genres/moods)."""
+    wanted, _ = _split_negated(_normalise(text), _list_terms(genre_vocab, mood_vocab))
+    return re.sub(r"\s+", " ", wanted).strip()
 
 
-def list_terms(genre_vocab: Sequence[str], mood_vocab: Sequence[str]) -> Tuple[str, ...]:
-    """Genre and mood words that can make up a rejected list ("no jazz, rock, or pop")."""
+@lru_cache(maxsize=8)
+def _vocab_terms(genre_vocab: Tuple[str, ...], mood_vocab: Tuple[str, ...]) -> Tuple[str, ...]:
     return tuple(sorted(set(_genre_terms(genre_vocab)) | {m.lower() for m in mood_vocab}))
+
+
+def _list_terms(genre_vocab: Sequence[str], mood_vocab: Sequence[str]) -> Tuple[str, ...]:
+    """Genre and mood words that can make up a rejected list ("no jazz, rock, or pop")."""
+    return _vocab_terms(tuple(genre_vocab), tuple(mood_vocab))
 
 
 def _genre_terms(genre_vocab: Sequence[str]) -> List[str]:
@@ -283,11 +300,12 @@ def parse_explicit(text: str, genre_vocab: Sequence[str], mood_vocab: Sequence[s
     """Pull catalog genres/moods and numeric hints straight out of the text."""
     normalised = _normalise(text)
     leaning: List[Tuple[str, Target]] = []          # "less acoustic" and friends
-    for attr, pattern, target in _LESS_LEXICON:
-        if pattern.search(normalised):
-            leaning.append((attr, target))
+    for attr, pattern, lean, flipped in _LESS_LEXICON:
+        found = pattern.search(normalised)
+        if found:
+            leaning.append((attr, flipped if found.group("neg") else lean))
             normalised = pattern.sub(" ", normalised)
-    wanted, rejected = _split_negated(normalised, list_terms(genre_vocab, mood_vocab))
+    wanted, rejected = _split_negated(normalised, _list_terms(genre_vocab, mood_vocab))
 
     profile = Profile()
     profile.avoid_genres, rejected = _extract_genres(rejected, genre_vocab, rejecting=True)
