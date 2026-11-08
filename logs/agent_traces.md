@@ -259,8 +259,8 @@ Request: `'something upbeat'`
 3. **plan**: context genres~pop/indie pop, context moods~happy, energy=0.70-0.85, danceability=0.70-0.85, acousticness=0.15-0.40
 4. **act**: iteration 1: ranked 18 songs; top = Rooftop Lights (5.75/5.75)
 5. **diversify**: diversity re-rank changed the top-5; brought in Chrome Highway, Monsoon Market
-6. **verify**: fit=1.00 evidence=0.60 confidence=0.60; issues: low_confidence
-7. **decide**: confidence=0.60, needs_review=True
+6. **verify**: fit=1.00 evidence=0.60 confidence=0.59; issues: low_confidence
+7. **decide**: confidence=0.59, needs_review=True
 
 ## gibberish
 

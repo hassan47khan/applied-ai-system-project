@@ -38,7 +38,7 @@ request -> guardrails -> retriever (knowledge base) -> planner/profile -> [act -
 | Scorer | `src/recommender.py` | Module 3 scorer, extended: range targets, mismatch penalties, related-genre credit, avoid list |
 | Agent | `src/agent.py` | Plan, retrieve, act, verify, revise, decide loop; confidence; human-review flag; full trace |
 | Explainer | `src/llm.py` | Grounded template explanations; optional Gemini with validation and automatic fallback |
-| Evaluation | `src/evaluate.py`, `tests/` | 29-check harness with RAG-vs-baseline lift; 156 pytest tests |
+| Evaluation | `src/evaluate.py`, `tests/` | 29-check harness with RAG-vs-baseline lift; 196 pytest tests |
 | Specialization check | `src/compare_explainers.py` | Runs the Module 3 explainer out of git history next to the constrained one, and shows what the output validator rejects |
 
 The human stays in the loop through the `needs_review` flag and the clarifying message: the agent never silently overrides what you asked for.
@@ -64,7 +64,7 @@ python -m src.main --trace "lofi at maximum energy, not acoustic"   # show the a
 python -m src.main --demo            # three built-in examples
 python -m src.main --interactive     # keep asking until 'quit'
 python -m src.main --json "road trip at night"
-python -m pytest                     # 156 tests
+python -m pytest                     # 196 tests
 python -m src.evaluate               # evaluation harness (add --traces logs/agent_traces.md)
 python -m src.compare_explainers     # baseline vs. constrained explanation comparison
 ```
@@ -224,7 +224,7 @@ Run `python -m src.evaluate`. This is the real output, also saved in [`logs/eval
 19  contradictory contexts               behaviour    0.75    yes  PASS
 20  contradiction: lofi but max energy   behaviour    0.64    yes  PASS
 21  impossible combo (adversarial)       behaviour    0.34    yes  PASS
-22  vague request                        behaviour    0.60    yes  PASS
+22  vague request                        behaviour    0.59    yes  PASS
 23  gibberish                            behaviour    0.00    yes  PASS
 24  empty input                          robustness   0.00    yes  PASS
 25  whitespace only                      robustness   0.00    yes  PASS
@@ -244,7 +244,7 @@ Confidence calibration
   mean confidence, answers flagged     : 0.29 (n=8)
 ```
 
-**Testing summary.** 29/29 harness checks and 156/156 pytest tests pass ([`logs/pytest_results.txt`](logs/pytest_results.txt)). Retrieval raised top-1 accuracy on situation-style requests from **2/7 to 7/7**. Answers the agent was willing to stand behind averaged **0.96** confidence; answers it flagged averaged **0.29**.
+**Testing summary.** 29/29 harness checks and 196/196 pytest tests pass ([`logs/pytest_results.txt`](logs/pytest_results.txt)). Retrieval raised top-1 accuracy on situation-style requests from **2/7 to 7/7**. Answers the agent was willing to stand behind averaged **0.96** confidence; answers it flagged averaged **0.29**.
 
 **What didn't work at first, and what I learned:**
 - My first harness run was 17/17, but I had written those cases *after* watching the system run, so they mostly confirmed what I already knew. Probing with inputs I hadn't tuned for exposed two real bugs: "**not** jazz" returned jazz at confidence 1.00, and "work out" retrieved the *coding* card because it was tokenized as "work". Both are fixed and now kept as regression cases (#8, #9).
@@ -272,7 +272,7 @@ The biggest lesson was that a **reliable AI system is mostly made of the parts t
 ```
 src/            agent, retrieval, profile, scoring, guardrails, llm, CLI, evaluate
 data/           songs.csv (18 tracks) + knowledge/ (13 context cards)
-tests/          156 pytest tests
+tests/          196 pytest tests
 diagrams/       architecture.md (Mermaid source)
 logs/           eval_results.txt, agent_traces.md, sample_runs.txt, pytest_results.txt,
                 before_negation_fix.txt, explainer_comparison.txt

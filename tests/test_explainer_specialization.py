@@ -50,7 +50,16 @@ def test_trade_offs_get_their_own_clause():
     text = TemplateExplainer().explain(song, ["energy 0.91 fits target 0.92 (+1.47)",
                                               "acousticness 0.80 misses target 0.10 (-1.40)"], card)
     assert "Trade-off:" in text
-    assert "misses" in text.split("Trade-off:")[1]
+    fits, tradeoff = text.split("Trade-off:")
+    assert "misses" in tradeoff and "misses" not in fits
+    assert "energy 0.91 fits" in fits
+
+
+def test_llm_flag_without_a_key_falls_back_to_the_template(monkeypatch):
+    from src.llm import make_explainer
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert isinstance(make_explainer(True), TemplateExplainer)
+    assert isinstance(make_explainer(False), TemplateExplainer)
 
 
 # ---- the validator actually enforces the style --------------------------------------

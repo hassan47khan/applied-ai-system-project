@@ -18,6 +18,7 @@ Every step is recorded in `AgentResult.trace` and in the log file.
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -165,8 +166,8 @@ class VibeFinderAgent:
             issues = self._verify(profile, candidates)
             if confidence < CONFIDENCE_MIN:
                 issues.append(("low_confidence",
-                               f"confidence {confidence:.2f} is below {CONFIDENCE_MIN:.2f}"))
-            step("verify", f"fit={fit:.2f} evidence={evidence:.2f} confidence={confidence:.2f}; issues: "
+                               f"confidence {_shown(confidence):.2f} is below {CONFIDENCE_MIN:.2f}"))
+            step("verify", f"fit={fit:.2f} evidence={evidence:.2f} confidence={_shown(confidence):.2f}; issues: "
                            + (", ".join(code for code, _ in issues) or "none"))
 
             conflict = next((text for code, text in issues if code == "conflict"), None)
@@ -180,7 +181,7 @@ class VibeFinderAgent:
 
         # 4. Decide -----------------------------------------------------------------
         result.profile = profile.describe()
-        result.confidence = round(confidence, 2)
+        result.confidence = _shown(confidence)
         result.issues = [code for code, _ in issues]
         issue_text = {code: text for code, text in issues}
         result.needs_review = bool(result.relaxations) or bool(issues)
@@ -274,6 +275,18 @@ class VibeFinderAgent:
             if song["genre"] in card.genres or song["mood"] in card.moods:
                 return card
         return cards[0] if cards else None
+
+
+def _shown(confidence: float) -> float:
+    """Confidence as reported: rounded to 2 decimals, but always on the same side of
+    CONFIDENCE_MIN as the raw value the decision used.
+
+    Plain rounding let a 0.5995 that failed the 0.60 check print as "confidence 0.60 is
+    below 0.60". Only values in [0.595, 0.60) are affected; they are shown as 0.59."""
+    shown = round(confidence, 2)
+    if confidence < CONFIDENCE_MIN <= shown:
+        shown = math.floor(CONFIDENCE_MIN * 100 - 1) / 100
+    return shown
 
 
 def _fmt(target) -> str:

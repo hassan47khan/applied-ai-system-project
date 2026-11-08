@@ -54,6 +54,13 @@ def test_avoided_genre_is_penalised():
     assert score_song({"avoid_genres": ["jazz"]}, song(genre="pop"))[0] == 0
 
 
+def test_context_mood_counts_but_less_than_an_explicit_mood():
+    explicit, _ = score_song({"moods": ["happy"]}, song())
+    context, reasons = score_song({"context_moods": ["happy"]}, song())
+    assert explicit > context > 0 and any("mood fits the context" in r for r in reasons)
+    assert score_song({"context_moods": ["sad"]}, song())[0] == 0
+
+
 def test_genre_scale_relaxes_genre_weight():
     full, _ = score_song({"genres": ["pop"], "genre_scale": 1.0}, song())
     half, _ = score_song({"genres": ["pop"], "genre_scale": 0.5}, song())
@@ -74,6 +81,12 @@ def test_ranking_is_deterministic_and_sorted():
     assert a == b
     scores = [sc for _, sc, _ in rank_songs(prefs, songs)]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_equal_scores_are_ordered_by_title_not_input_order():
+    tied = [song(id=1, title="Zulu"), song(id=2, title="Alpha"), song(id=3, title="Mike")]
+    for order in (tied, tied[::-1]):
+        assert [s["title"] for s, _, _ in rank_songs({"genre": "pop"}, order)] == ["Alpha", "Mike", "Zulu"]
 
 
 def test_module3_recommend_songs_shape_still_works():

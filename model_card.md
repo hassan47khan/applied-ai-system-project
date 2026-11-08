@@ -24,7 +24,7 @@
 | Evaluation | Result |
 |---|---|
 | Evaluation harness (`python -m src.evaluate`) | **29/29 checks pass**: 23 behaviour, 5 robustness, 1 consistency |
-| Unit and behaviour tests (`python -m pytest`) | **156/156 pass** |
+| Unit and behaviour tests (`python -m pytest`) | **196/196 pass** |
 | Retrieval lift on situation-style requests | baseline without retrieval **2/7** correct top result → with RAG **7/7** |
 | Confidence calibration | answers not flagged average **0.96**; flagged answers average **0.29** |
 | Consistency | identical output across 5 repeated runs, and across 3 processes with different `PYTHONHASHSEED` |
@@ -121,7 +121,7 @@ The realistic misuse surface for a music recommender is small, but the same patt
 - **My first test suite proved nothing.** It passed 17/17 because I wrote the cases after seeing the outputs. Ten minutes of throwing *unscripted* requests at the system found the worst bug in the project: "not jazz" produced jazz **at confidence 1.00**. Retrieval made it worse, because the word "jazz" pulled in the jazz card. The fix needed two layers: excluding rejected songs from ranking, and stripping rejected phrases from the retrieval query.
 - **My negation fix passed its tests and was still wrong.** A later code review found that "not jazz" was fixed but "anything but jazz" was not, because I had fixed the one phrasing I tested. The regression case held while the bug class stayed open. The real fix was to stop matching phrases per genre and work out which part of a sentence is being rejected, once, for genres, moods and features alike.
 - **A bug that only appears across processes.** The conflict message listed features in a set's iteration order, which changes with Python's per-process hash randomization. My "run it 5 times" consistency check ran in one process, so it could never see it. I only noticed because two terminal runs differed. That changed how I think about "deterministic".
-- **Confidence was easier to compute than to make meaningful.** Raw "fit" was ~1.0 for almost everything. Adding an *evidence* term (how strongly retrieval matched) is what made vague requests like "something upbeat" drop to 0.60 and get flagged.
+- **Confidence was easier to compute than to make meaningful.** Raw "fit" was ~1.0 for almost everything. Adding an *evidence* term (how strongly retrieval matched) is what made vague requests like "something upbeat" drop below the 0.60 threshold (0.59) and get flagged. Reported confidence is rounded, but never across the threshold: the raw 0.5995 once printed as "confidence 0.60 is below 0.60".
 
 ## 8. Changes from VibeFinder 1.0 (and why)
 

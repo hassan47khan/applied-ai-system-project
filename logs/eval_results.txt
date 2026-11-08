@@ -23,7 +23,7 @@ VibeFinder 2.0 evaluation
 19  contradictory contexts               behaviour    0.75    yes  PASS
 20  contradiction: lofi but max energy   behaviour    0.64    yes  PASS
 21  impossible combo (adversarial)       behaviour    0.34    yes  PASS
-22  vague request                        behaviour    0.60    yes  PASS
+22  vague request                        behaviour    0.59    yes  PASS
 23  gibberish                            behaviour    0.00    yes  PASS
 24  empty input                          robustness   0.00    yes  PASS
 25  whitespace only                      robustness   0.00    yes  PASS
