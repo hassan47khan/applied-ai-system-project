@@ -38,7 +38,8 @@ request -> guardrails -> retriever (knowledge base) -> planner/profile -> [act -
 | Scorer | `src/recommender.py` | Module 3 scorer, extended: range targets, mismatch penalties, related-genre credit, avoid list |
 | Agent | `src/agent.py` | Plan, retrieve, act, verify, revise, decide loop; confidence; human-review flag; full trace |
 | Explainer | `src/llm.py` | Grounded template explanations; optional Gemini with validation and automatic fallback |
-| Evaluation | `src/evaluate.py`, `tests/` | 29-check harness with RAG-vs-baseline lift; 132 pytest tests |
+| Evaluation | `src/evaluate.py`, `tests/` | 29-check harness with RAG-vs-baseline lift; 141 pytest tests |
+| Specialization check | `src/compare_explainers.py` | Runs the Module 3 explainer out of git history next to the constrained one, and shows what the output validator rejects |
 
 The human stays in the loop through the `needs_review` flag and the clarifying message: the agent never silently overrides what you asked for.
 
@@ -63,8 +64,9 @@ python -m src.main --trace "lofi at maximum energy, not acoustic"   # show the a
 python -m src.main --demo            # three built-in examples
 python -m src.main --interactive     # keep asking until 'quit'
 python -m src.main --json "road trip at night"
-python -m pytest                     # 132 tests
+python -m pytest                     # 141 tests
 python -m src.evaluate               # evaluation harness (add --traces logs/agent_traces.md)
+python -m src.compare_explainers     # baseline vs. constrained explanation comparison
 ```
 
 **Optional LLM explanations:** `export GEMINI_API_KEY=...` then add `--llm`. Without a key, or if the API fails, VibeFinder falls back to offline explanations automatically. The whole system, tests included, runs offline.
@@ -242,7 +244,7 @@ Confidence calibration
   mean confidence, answers flagged     : 0.29 (n=8)
 ```
 
-**Testing summary.** 29/29 harness checks and 132/132 pytest tests pass ([`logs/pytest_results.txt`](logs/pytest_results.txt)). Retrieval raised top-1 accuracy on situation-style requests from **2/7 to 7/7**. Answers the agent was willing to stand behind averaged **0.96** confidence; answers it flagged averaged **0.29**.
+**Testing summary.** 29/29 harness checks and 141/141 pytest tests pass ([`logs/pytest_results.txt`](logs/pytest_results.txt)). Retrieval raised top-1 accuracy on situation-style requests from **2/7 to 7/7**. Answers the agent was willing to stand behind averaged **0.96** confidence; answers it flagged averaged **0.29**.
 
 **What didn't work at first, and what I learned:**
 - My first harness run was 17/17, but I had written those cases *after* watching the system run, so they mostly confirmed what I already knew. Probing with inputs I hadn't tuned for exposed two real bugs: "**not** jazz" returned jazz at confidence 1.00, and "work out" retrieved the *coding* card because it was tokenized as "work". Both are fixed and now kept as regression cases (#8, #9).
@@ -269,9 +271,10 @@ The biggest lesson was that a **reliable AI system is mostly made of the parts t
 ```
 src/            agent, retrieval, profile, scoring, guardrails, llm, CLI, evaluate
 data/           songs.csv (18 tracks) + knowledge/ (13 context cards)
-tests/          132 pytest tests
+tests/          141 pytest tests
 diagrams/       architecture.md (Mermaid source)
-logs/           eval_results.txt, agent_traces.md, sample_runs.txt, pytest_results.txt, before_negation_fix.txt
+logs/           eval_results.txt, agent_traces.md, sample_runs.txt, pytest_results.txt,
+                before_negation_fix.txt, explainer_comparison.txt
 assets/         images (optional)
 model_card.md   limitations, bias, misuse, testing results, AI collaboration
 ai_interactions.md  agent reasoning traces (stretch) + AI-assisted development notes

@@ -1,0 +1,25 @@
+==============================================================================
+  Explanation specialization: baseline vs. constrained output
+==============================================================================
+
+1. BASELINE - Module 3 explanation string (commit 12213e3, prefs={'genre': 'lofi', 'mood': 'chill', 'energy': 0.25})
+   top song : Library Rain [lofi]
+   text     : genre match (+1.0); mood match (+1.0); energy proximity (+1.80)
+   words    : 9
+   grounding: score arithmetic only - no song name, no prose, no listening guidance
+
+2. SPECIALIZED - VibeFinder 2.0 constrained explainer (request: 'I need something calm for studying late at night')
+   top song : Quantum Lullaby [ambient electronic]
+   text     : Quantum Lullaby fits because genre fits the context: ambient electronic (+0.75); mood fits the context: focused (+0.50); energy 0.26 fits target 0.25 (+1.47). Context (Late-night studying): Studying works best with low-energy, steady music that does not compete for attention.
+   words    : 39
+   grounding: names the song, cites every scored reason, ends with the retrieved card's guidance
+
+3. VALIDATOR - constraints in src/llm.py (max 70 words, must name the song)
+   [ 12 words] compliant: short and names the song: KEPT
+   [ 12 words] omits the song title: REJECTED -> template fallback
+   [ 92 words] over-long: exceeds the word cap: REJECTED -> template fallback
+   [ 15 words] invents facts but stays short and names the song: KEPT
+
+   Note: the last case is KEPT. The validator enforces length and grounding in the
+   song title; it cannot detect invented claims. That is why the LLM is optional and
+   the offline template is the default (see model_card.md section 6).
