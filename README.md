@@ -17,7 +17,7 @@ Describe a moment ("feeling bummed out on a rainy Sunday", "música para una fie
 | **Conversation** | One-shot | **Multi-turn refinement** |
 | **Interface** | CLI | **Streamlit app** with cover art and previews; the CLI still works |
 | **Safety** | Override detection | Plus Unicode normalisation, a 26-attack **prompt-injection suite**, and **distress detection** with crisis-line info |
-| **Evaluation** | 29 checks, 211 tests | 40 checks, **44-query labelled retrieval benchmark with an ablation table**, **384 tests**, **63-mutant mutation check** |
+| **Evaluation** | 29 checks, 211 tests | 40 checks, **44-query labelled retrieval benchmark with an ablation table**, **388 tests**, **63-mutant mutation check** |
 
 Everything degrades gracefully. Without a Gemini key, or when the free tier is out of quota, VibeFinder runs fully offline on the 2.0 path (rules, lexical retrieval, templates) and says so in the trace and the UI.
 
@@ -74,7 +74,7 @@ streamlit run app/streamlit_app.py                          # the app
 python -m src.main "I need something calm for studying late at night"
 python -m src.main --interactive                            # follow-ups refine the last answer
 python -m src.main --trace "lofi at maximum energy, not acoustic"
-python -m pytest                                            # 384 tests, offline
+python -m pytest                                            # 388 tests, offline
 python -m src.evaluate --injection                          # harness + ablation + injection suite
 python tools/mutate.py                                      # do the tests notice 63 planted bugs?
 python tools/build_catalog.py                               # rebuild data/songs.csv from the source dataset
@@ -152,7 +152,7 @@ Prompt-injection suite: 26/26 attacks handled safely
 **Results with Gemini: not run yet.** The dense, hybrid and hybrid+rerank rows, the 7 Gemini-only cases and the live injection run need a key and a built index. Run `python -m src.index build && python -m src.index calibrate && python -m src.evaluate --injection` and the output replaces this paragraph.
 
 **Testing.**
-- **384 pytest tests**, all offline. Gemini is replaced by a fake SDK whose embeddings put synonyms on the same axis, so the hybrid's semantic recall is tested without a network.
+- **388 pytest tests**, all offline. Gemini is replaced by a fake SDK whose embeddings put synonyms on the same axis, so the hybrid's semantic recall is tested without a network.
 - **The injection suite runs against a fully hijacked fake model.** It returns SQL in genre fields, `energy: 9999` and "ignore previous instructions" as the paraphrase, and the system must still act only on catalog values within [0, 1].
 - **`tools/mutate.py` plants 63 realistic bugs one at a time**, 16 of them in the 3.0 code. Examples: invented numbers allowed in explanations, Gemini retries switched off, edited cards not detected by the index, flagged input sent to Gemini. The suite must fail on every one.
 
@@ -172,7 +172,7 @@ Prompt-injection suite: 26/26 attacks handled safely
 - **Gemini decides what you meant, never what gets ranked.** Its output is enum-constrained JSON, validated and cross-checked against the rules, and the agent's scoring, verification and confidence stay deterministic. Trade-off: the model can't express preferences outside the catalog's vocabulary.
 - **The user's raw text reaches Gemini only for understanding and rerank, never for explanations.** The explanation prompt holds catalog facts and card text only, as in 2.0.
 - **A committed index plus a disk cache.** The free tier's limits are unpublished and tight, so the knowledge base is embedded once at build time, and every query, rating and explanation is cached. A demo costs a handful of calls, and the evaluation is reproducible.
-- **The offline path is a real product, not an error page.** All 384 tests run without a network; the UI and CLI say which path ran and why.
+- **The offline path is a real product, not an error page.** All 388 tests run without a network; the UI and CLI say which path ran and why.
 - **A real catalog, curated deterministically.** The catalog is popularity-first with at most 2 songs per artist, and the build script is committed. Trade-off: it inherits the source's biases (see provenance).
 - **Follow-ups are parsed by rules, not by the model.** "Not #3" has one meaning, and a rule you can read is easier to trust than a model for it.
 - **Refuse rather than guess, relax and ask rather than silently override**, and keep variety re-ranking. All three carry over from 2.0.
@@ -185,7 +185,7 @@ src/            agent, understanding, gemini client, retrieval (+ embeddings, re
                 scoring, guardrails, llm, session, enrich, CLI, evaluate, index
 data/           songs.csv (580 tracks) + CATALOG_PROVENANCE.md, knowledge/ (30 cards),
                 index/ (embedding index + calibration), eval/ (gold set, calibration set, injection suite)
-tests/          384 tests; fixtures/ keeps the 2.0 catalog and cards the older tests pin
+tests/          388 tests; fixtures/ keeps the 2.0 catalog and cards the older tests pin
 tools/          build_catalog.py, mutate.py
 diagrams/       architecture.md (Mermaid)
 logs/           eval results, sample runs, traces

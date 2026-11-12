@@ -60,7 +60,7 @@ flowchart TD
     UI -. "follow-up" .-> U
 
     subgraph TESTING["Reliability"]
-        T1[pytest: 384 tests, offline,<br/>fake Gemini SDK]
+        T1[pytest: 388 tests, offline,<br/>fake Gemini SDK]
         T2[src/evaluate.py: behaviour cases,<br/>retrieval ablation on 44 labelled queries,<br/>26-attack injection suite]
         T3[tools/mutate.py: 63 planted bugs]
     end
