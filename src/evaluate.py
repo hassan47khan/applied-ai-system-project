@@ -1,24 +1,36 @@
 """
 Evaluation harness: runs VibeFinder on predefined inputs and prints a pass/fail summary.
 
-    python -m src.evaluate                       # table + summary
-    python -m src.evaluate --traces logs/agent_traces.md   # also save every agent trace
+    python -m src.evaluate                                  # table + summaries
+    python -m src.evaluate --strict                         # exit 1 if any check fails
+    python -m src.evaluate --traces logs/agent_traces.md    # also save every agent trace
+    python -m src.evaluate --no-ablation                    # skip the retrieval ablation
 
-Three kinds of checks:
-  1. Behaviour cases   does the right kind of song come first, and is the agent
-                       honest (flags / refuses) when it should be?
+Checks:
+  1. Behaviour cases   does the right kind of song come first, and is the agent honest
+                       (flags / refuses) when it should be? Cases marked `needs_gemini`
+                       exercise what only the Gemini path can do (synonyms, other
+                       languages, several intents); offline they are reported as SKIP.
   2. Robustness cases  empty, huge, non-text and instruction-override input must not crash.
   3. Consistency       the same request, repeated, must give identical results.
-Then a baseline comparison: the same scorer with retrieval switched off.
+Then:
+  * retrieval lift     the same agent with retrieval switched off
+  * retrieval ablation Recall@3 / Hit@1 / MRR / nDCG@3 / abstention for every retriever
+                       on data/eval/retrieval_gold.json (labelled before looking at outputs)
+  * calibration        mean confidence of flagged vs unflagged answers
 """
 
 import argparse
 import logging
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Set
+from dataclasses import dataclass
+from typing import List, Optional, Set
 
-from .agent import AgentResult, VibeFinderAgent
+from .agent import RETRIEVAL_MIN_SCORE, AgentResult, VibeFinderAgent
 from .log_setup import setup_logging
+
+HIGH_ENERGY = {"hip hop", "edm", "rock", "metal", "punk", "drum and bass", "techno", "house",
+               "kpop", "reggaeton", "latin pop", "pop", "funk", "indie rock", "synth pop", "latin"}
+CALM = {"lofi", "ambient", "classical", "piano", "jazz", "folk"}
 
 
 @dataclass
@@ -27,6 +39,7 @@ class Case:
     query: object
     kind: str                       # "behaviour" | "robustness"
     top1_genres: Optional[Set[str]] = None
+    top1_moods: Optional[Set[str]] = None
     top3_contains: Optional[str] = None
     top3_excludes_genres: Optional[Set[str]] = None
     all_excludes_genres: Optional[Set[str]] = None
@@ -37,54 +50,83 @@ class Case:
     expect_no_recs: bool = False
     expect_warning: Optional[str] = None
     in_lift_set: bool = False       # used for the retrieval-vs-baseline comparison
+    needs_gemini: bool = False      # only meaningful when the Gemini path is available
 
 
 CASES: List[Case] = [
+    # Situations: retrieval has to turn an activity into a sound.
     Case("study (calm, late night)", "I need something calm for studying late at night", "behaviour",
-         top1_genres={"lofi", "ambient", "ambient electronic"}, expect_review=False, in_lift_set=True),
+         top1_genres={"lofi", "ambient", "classical", "piano"}, expect_review=False, in_lift_set=True),
     Case("gym workout", "pump me up for the gym", "behaviour",
-         top1_genres={"pop", "rock"}, expect_review=False, in_lift_set=True),
+         top1_genres={"hip hop", "edm", "rock", "metal"}, expect_review=False, in_lift_set=True),
     Case("romantic dinner", "romantic dinner with some jazz", "behaviour",
-         top1_genres={"jazz", "classic jazz"}, expect_review=False, in_lift_set=True),
+         top1_genres={"jazz"}, expect_review=False, in_lift_set=True),
     Case("rainy and sad", "it's raining and I feel sad", "behaviour",
-         top3_contains="Pinewood Letters", expect_review=False, in_lift_set=True),
+         top1_moods={"melancholy", "moody"}, expect_review=False, in_lift_set=True),
     Case("night drive", "road trip at night", "behaviour",
-         top1_genres={"synthwave"}, expect_review=False, in_lift_set=True),
+         top1_genres={"synth pop", "electronic", "indie rock", "house"}, expect_review=False, in_lift_set=True),
     Case("beach party", "beach party this summer", "behaviour",
-         top1_genres={"world fusion", "latin pop", "pop", "indie pop"}, expect_review=False, in_lift_set=True),
+         top1_genres={"reggae", "reggaeton", "latin pop", "latin", "world fusion"}, expect_review=False,
+         in_lift_set=True),
     Case("angry venting", "angry and need to vent", "behaviour",
-         top1_genres={"rock", "pop"}, expect_review=False, in_lift_set=True),
-    # Regression cases: found by probing untuned inputs, fixed, and kept so they stay fixed.
+         top1_genres={"metal", "punk", "rock", "drum and bass"}, expect_review=False, in_lift_set=True),
+    Case("falling asleep", "music to help me fall asleep", "behaviour",
+         top1_genres={"ambient", "classical", "piano"}, expect_review=False, in_lift_set=True),
+    Case("running", "going for a run", "behaviour",
+         top1_genres={"drum and bass", "edm", "house", "punk"}, expect_review=False, in_lift_set=True),
+    # Regression cases carried over from VibeFinder 2.0, on the real catalog.
     Case("negation: 'not jazz'", "relaxing music but not jazz", "behaviour",
-         top3_excludes_genres={"jazz", "classic jazz"}),
+         top3_excludes_genres={"jazz"}),
     Case("negation + 'work out'", "I hate rock, give me something to work out to", "behaviour",
-         top1_genres={"pop", "latin pop"}, top3_excludes_genres={"rock"}, expect_review=False),
+         top1_genres=HIGH_ENERGY - {"rock", "indie rock"}, top3_excludes_genres={"rock", "indie rock"},
+         expect_review=False),
     Case("negation: 'anything but jazz'", "anything but jazz", "behaviour",
-         top3_excludes_genres={"jazz", "classic jazz"}, expect_review=True, expect_issue="exclusion_only"),
-    Case("negation: curly apostrophe", "I don\u2019t want jazz, play something relaxing", "behaviour",
-         top3_excludes_genres={"jazz", "classic jazz"}),
+         top3_excludes_genres={"jazz"}, expect_review=True, expect_issue="exclusion_only"),
+    Case("negation: curly apostrophe", "I don’t want jazz, play something relaxing", "behaviour",
+         top3_excludes_genres={"jazz"}),
     Case("negation: list of genres", "not jazz or rock, I need to focus", "behaviour",
-         top3_excludes_genres={"jazz", "classic jazz", "rock"}),
+         top3_excludes_genres={"jazz", "rock", "indie rock"}),
     Case("negated feature: 'not loud'", "not loud music", "behaviour",
          expect_review=True, expect_issue="exclusion_only"),
     Case("negated mood: 'not happy'", "not happy", "behaviour",
          expect_review=True, expect_issue="exclusion_only"),
     Case("rejected genre at any rank", "pump me up for the gym but no pop", "behaviour",
-         top1_genres={"rock"}, all_excludes_genres={"pop", "indie pop", "latin pop"}),
+         top1_genres=HIGH_ENERGY - {"pop", "indie pop", "latin pop", "synth pop"},
+         all_excludes_genres={"pop", "indie pop", "latin pop", "synth pop"}),
     Case("exclusion only", "no jazz", "behaviour", expect_review=True, expect_issue="exclusion_only"),
-    Case("partial genre name", "folk music", "behaviour", top1_genres={"indie folk"}, expect_review=False),
+    Case("partial genre name", "indie music", "behaviour", top1_genres={"indie pop", "indie rock"},
+         expect_review=False),
+    Case("real-catalog spelling: k-pop", "k-pop for a dance party", "behaviour",
+         top1_genres={"kpop"}, expect_review=False),
+    Case("real-catalog spelling: dnb", "fast dnb", "behaviour", top1_genres={"drum and bass"}),
     Case("off-topic with one known word", "I am late for my dentist appointment", "behaviour",
          expect_review=True, expect_issue="no_signal", expect_no_recs=True),
     Case("contradictory contexts", "sleep then gym", "behaviour",
-         top1_genres={"ambient", "ambient electronic", "lofi"}, expect_review=True,
-         expect_issue="mixed_context"),
+         top1_genres={"ambient", "classical", "piano"}, expect_review=True, expect_issue="mixed_context"),
     Case("contradiction: lofi but max energy", "lofi at maximum energy, not acoustic", "behaviour",
          expect_relaxed=True, expect_review=True),
-    Case("impossible combo (adversarial)", "ambient music that is intense, loud, very danceable and acoustic",
+    Case("impossible combo (adversarial)", "ambient music that is maximum energy, undanceable and acoustic",
          "behaviour", expect_review=True, expect_issue="unsatisfiable"),
-    Case("vague request", "something upbeat", "behaviour", expect_review=True, expect_issue="low_confidence"),
+    Case("vague: lone incidental word", "good songs", "behaviour", expect_review=True,
+         expect_issue="low_confidence"),
     Case("gibberish", "asdfghjkl qwerty", "behaviour",
          expect_review=True, expect_issue="no_signal", expect_no_recs=True),
+    # What the offline parser and lexical retrieval can't do. Gemini path only.
+    Case("synonym: 'bummed out'", "feeling bummed out", "behaviour", needs_gemini=True,
+         top1_moods={"melancholy", "moody"}),
+    Case("synonym: 'livid'", "I'm livid right now", "behaviour", needs_gemini=True,
+         top1_genres={"metal", "punk", "rock", "drum and bass"}),
+    Case("synonym: 'dumped'", "my girlfriend just dumped me", "behaviour", needs_gemini=True,
+         top1_moods={"melancholy", "moody"}),
+    Case("non-English: Spanish study", "música tranquila para estudiar", "behaviour", needs_gemini=True,
+         top1_genres=CALM),
+    Case("non-English: German jogging", "Musik zum Joggen", "behaviour", needs_gemini=True,
+         top1_genres=HIGH_ENERGY),
+    Case("multi-intent: sad road trip", "sad songs for a road trip", "behaviour", needs_gemini=True,
+         top1_moods={"melancholy", "moody"}),
+    Case("multi-intent negation", "no jazz and calm", "behaviour", needs_gemini=True,
+         top3_excludes_genres={"jazz"}, top1_genres=CALM - {"jazz"}),
+    # Robustness.
     Case("empty input", "", "robustness", expect_ok=False, expect_no_recs=True),
     Case("whitespace only", "    \n\t ", "robustness", expect_ok=False, expect_no_recs=True),
     Case("non-text input", None, "robustness", expect_ok=False, expect_no_recs=True),
@@ -104,6 +146,10 @@ def check(case: Case, result: AgentResult) -> List[str]:
         got = result.recommendations[0].song["genre"] if result.recommendations else None
         if got not in case.top1_genres:
             failures.append(f"top-1 genre {got!r} not in {sorted(case.top1_genres)}")
+    if case.top1_moods is not None:
+        got = result.recommendations[0].song["mood"] if result.recommendations else None
+        if got not in case.top1_moods:
+            failures.append(f"top-1 mood {got!r} not in {sorted(case.top1_moods)}")
     if case.top3_contains is not None and case.top3_contains not in result.top_titles[:3]:
         failures.append(f"{case.top3_contains!r} not in top 3 {result.top_titles[:3]}")
     if case.top3_excludes_genres is not None:
@@ -132,33 +178,88 @@ def check(case: Case, result: AgentResult) -> List[str]:
 def _top1_ok(case: Case, result: AgentResult) -> bool:
     if not result.recommendations:
         return False
+    top = result.recommendations[0].song
     if case.top1_genres is not None:
-        return result.recommendations[0].song["genre"] in case.top1_genres
+        return top["genre"] in case.top1_genres
+    if case.top1_moods is not None:
+        return top["mood"] in case.top1_moods
     if case.top3_contains is not None:
         return case.top3_contains in result.top_titles[:3]
     return False
+
+
+def run_ablation(print_misses: bool = False) -> None:
+    """Every retriever on the labelled gold set. Arms that need Gemini say so if skipped."""
+    from .config import get_settings
+    from .embeddings import make_retriever
+    from .gemini import shared_client
+    from .retrieval import load_cards
+    from .retrieval_eval import evaluate_retriever, load_queries
+
+    settings = get_settings()
+    cards = load_cards(settings.knowledge_dir)
+    queries = load_queries()
+    gemini_ok = shared_client().available
+    arms = [("tfidf", "tfidf", False), ("bm25", "bm25", False), ("dense", "dense", False),
+            ("hybrid", "hybrid", False), ("hybrid+rerank", "hybrid", True)]
+    print()
+    print(f"Retrieval ablation ({len(queries)} labelled queries, data/eval/retrieval_gold.json)")
+    print(f"  {'retriever':<14} {'R@3':>5} {'Hit@1':>6} {'MRR':>5} {'nDCG@3':>7} {'abstain':>8}  "
+          f"{'direct':>6} {'synonym':>7} {'multi':>6} {'non-en':>6}")
+    reports = []
+    for label, mode, rerank in arms:
+        if mode in {"dense", "hybrid"} and (label != "hybrid" or rerank) and not gemini_ok:
+            print(f"  {label:<14} skipped (Gemini {shared_client().unavailable_reason()})")
+            continue
+        retriever, notes = make_retriever(cards, mode=mode, settings=settings.__class__(rerank=rerank))
+        info = lambda: bool((getattr(retriever, "last_info", {}) or {}).get("fallback"))  # noqa: E731
+        rep = evaluate_retriever(label, lambda q: [c.id for c, _ in retriever.retrieve(
+                                     q, k=3, min_score=RETRIEVAL_MIN_SCORE)],
+                                 queries, fallback_of=info)
+        reports.append(rep)
+        kinds = rep.by_kind
+        note = f"  ({rep.fallbacks} fell back to lexical)" if rep.fallbacks else ""
+        print(f"  {label:<14} {rep.recall3:5.2f} {rep.hit1:6.2f} {rep.mrr:5.2f} {rep.ndcg3:7.2f} "
+              f"{rep.abstain:8.2f}  {kinds.get('direct', 0):6.2f} {kinds.get('synonym', 0):7.2f} "
+              f"{kinds.get('multi_intent', 0):6.2f} {kinds.get('non_english', 0):6.2f}{note}")
+    if print_misses:
+        for rep in reports:
+            for q, got, want in rep.misses:
+                print(f"    [{rep.name}] {q!r}: got {got}, want {want or 'nothing'}")
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="VibeFinder evaluation harness")
     parser.add_argument("--traces", help="write every agent trace to this markdown file")
     parser.add_argument("--strict", action="store_true", help="exit with status 1 if any case fails")
+    parser.add_argument("--no-ablation", action="store_true", help="skip the retrieval ablation")
+    parser.add_argument("--misses", action="store_true", help="list every retrieval miss in the ablation")
     args = parser.parse_args(argv)
 
     setup_logging(console_level=logging.CRITICAL)  # keep the table readable; details go to logs/
-    agent = VibeFinderAgent()
-    baseline = VibeFinderAgent(use_retrieval=False)
+    from .gemini import shared_client
+    from .llm import make_explainer
+    gemini = shared_client()
+    agent = VibeFinderAgent(explainer=make_explainer(False))
+    baseline = VibeFinderAgent(use_retrieval=False, explainer=make_explainer(False))
 
-    print("VibeFinder 2.0 evaluation")
-    print("=" * 86)
-    print(f"{'#':>2}  {'case':<36} {'kind':<11} {'conf':>5} {'review':>6}  result")
-    print("-" * 86)
+    path = "gemini" if gemini.available else f"offline ({gemini.unavailable_reason()})"
+    print(f"VibeFinder 3.0 evaluation  [path: {path}, catalog: {len(agent.songs)} songs, "
+          f"{len(agent.cards)} context cards]")
+    print("=" * 90)
+    print(f"{'#':>2}  {'case':<38} {'kind':<11} {'conf':>5} {'review':>6}  result")
+    print("-" * 90)
 
-    passed = 0
-    results: List[AgentResult] = []
+    passed = skipped = 0
+    results: List[Optional[AgentResult]] = []
     confidences_ok: List[float] = []
     confidences_flagged: List[float] = []
     for i, case in enumerate(CASES, start=1):
+        if case.needs_gemini and not gemini.available:
+            results.append(None)
+            skipped += 1
+            print(f"{i:>2}  {case.name:<38} {case.kind:<11} {'':>5} {'':>6}  SKIP (needs Gemini)")
+            continue
         result = agent.run(case.query)
         results.append(result)
         failures = check(case, result)
@@ -166,7 +267,7 @@ def main(argv=None) -> int:
         if result.ok and result.recommendations:
             (confidences_flagged if result.needs_review else confidences_ok).append(result.confidence)
         status = "PASS" if not failures else "FAIL: " + "; ".join(failures)
-        print(f"{i:>2}  {case.name:<36} {case.kind:<11} {result.confidence:>5.2f} "
+        print(f"{i:>2}  {case.name:<38} {case.kind:<11} {result.confidence:>5.2f} "
               f"{'yes' if result.needs_review else 'no':>6}  {status}")
 
     # Consistency: same request, 5 runs, identical output.
@@ -175,20 +276,20 @@ def main(argv=None) -> int:
     runs = [(tuple(r.top_titles), r.confidence, r.message) for r in repeats]
     consistent = len(set(runs)) == 1
     passed += consistent
-    total = len(CASES) + 1
-    print(f"{total:>2}  {'consistency (5 repeated runs)':<36} {'reliability':<11} {'':>5} {'':>6}  "
+    total = len(CASES) + 1 - skipped
+    print(f"{len(CASES) + 1:>2}  {'consistency (5 repeated runs)':<38} {'reliability':<11} {'':>5} {'':>6}  "
           f"{'PASS' if consistent else 'FAIL: outputs differed between runs'}")
-    print("-" * 86)
-    print(f"Checks passed: {passed}/{total}")
+    print("-" * 90)
+    print(f"Checks passed: {passed}/{total}" + (f"  ({skipped} skipped: need Gemini)" if skipped else ""))
 
     # Retrieval lift: same scorer, retrieval switched off.
-    lift_cases = [c for c in CASES if c.in_lift_set]
-    rag_hits = sum(_top1_ok(c, r) for c, r in zip(CASES, results) if c.in_lift_set)
-    base_hits = sum(_top1_ok(c, baseline.run(c.query)) for c in lift_cases)
+    lift = [(c, r) for c, r in zip(CASES, results) if c.in_lift_set and r is not None]
+    rag_hits = sum(_top1_ok(c, r) for c, r in lift)
+    base_hits = sum(_top1_ok(c, baseline.run(c.query)) for c, _ in lift)
     print()
     print("Retrieval lift (requests that describe a situation, not a genre)")
-    print(f"  without retrieval (baseline): {base_hits}/{len(lift_cases)} correct top result")
-    print(f"  with retrieval (RAG)        : {rag_hits}/{len(lift_cases)} correct top result")
+    print(f"  without retrieval (baseline): {base_hits}/{len(lift)} correct top result")
+    print(f"  with retrieval (RAG)        : {rag_hits}/{len(lift)} correct top result")
 
     def mean(xs: List[float]) -> float:
         return sum(xs) / len(xs) if xs else 0.0
@@ -197,10 +298,21 @@ def main(argv=None) -> int:
     print(f"  mean confidence, answers NOT flagged: {mean(confidences_ok):.2f} (n={len(confidences_ok)})")
     print(f"  mean confidence, answers flagged     : {mean(confidences_flagged):.2f} (n={len(confidences_flagged)})")
 
+    if not args.no_ablation:
+        run_ablation(print_misses=args.misses)
+
+    if gemini.stats.calls or gemini.stats.cache_hits:
+        s = gemini.stats
+        print()
+        print(f"Gemini usage: {s.calls} calls, {s.cache_hits} cache hits, {s.failures} failures, "
+              f"{s.prompt_tokens + s.output_tokens} tokens")
+
     if args.traces:
         with open(args.traces, "w", encoding="utf-8") as f:
             f.write("# VibeFinder agent traces (generated by `python -m src.evaluate --traces`)\n")
             for case, result in zip(CASES, results):
+                if result is None:
+                    continue
                 f.write(f"\n## {case.name}\n\nRequest: `{str(case.query)[:80]!r}`\n\n")
                 for t in result.trace:
                     f.write(f"{t['step']}. **{t['action']}**: {t['detail']}\n")

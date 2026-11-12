@@ -1,0 +1,53 @@
+{
+  "description": "Labelled queries for retrieval evaluation and calibration. 'relevant' lists every acceptable context card, best first. An empty list means the query is off-topic and the right answer is to retrieve nothing. 'kind' groups queries for the per-category breakdown. Written before looking at any retriever's output on them.",
+  "queries": [
+    {"q": "I need something calm for studying late at night", "relevant": ["late-night-study"], "kind": "direct"},
+    {"q": "pump me up for the gym", "relevant": ["gym-workout"], "kind": "direct"},
+    {"q": "romantic dinner with some jazz", "relevant": ["romantic-date", "dinner-cafe-jazz"], "kind": "direct"},
+    {"q": "it's raining and I feel sad", "relevant": ["rainy-day-melancholy"], "kind": "direct"},
+    {"q": "road trip at night", "relevant": ["night-drive"], "kind": "direct"},
+    {"q": "beach party this summer", "relevant": ["summer-beach", "house-party-dance"], "kind": "direct"},
+    {"q": "angry and need to vent", "relevant": ["angry-release"], "kind": "direct"},
+    {"q": "music to help me fall asleep", "relevant": ["sleep-wind-down"], "kind": "direct"},
+    {"q": "coding all afternoon, need to get in the zone", "relevant": ["coding-deep-work", "focus-sprint"], "kind": "direct"},
+    {"q": "cleaning the apartment this morning", "relevant": ["cleaning-chores"], "kind": "direct"},
+    {"q": "yoga class playlist", "relevant": ["yoga-stretch"], "kind": "direct"},
+    {"q": "karaoke night with friends", "relevant": ["karaoke-singalong"], "kind": "direct"},
+
+    {"q": "feeling bummed out", "relevant": ["rainy-day-melancholy", "heartbreak"], "kind": "synonym"},
+    {"q": "I'm totally exhausted and want to drift off", "relevant": ["sleep-wind-down"], "kind": "synonym"},
+    {"q": "hitting the treadmill", "relevant": ["running-cardio", "gym-workout"], "kind": "synonym"},
+    {"q": "my girlfriend just dumped me", "relevant": ["heartbreak"], "kind": "synonym"},
+    {"q": "I'm livid right now", "relevant": ["angry-release"], "kind": "synonym"},
+    {"q": "whipping up pasta for the family", "relevant": ["cooking-kitchen"], "kind": "synonym"},
+    {"q": "cramming before the final tomorrow", "relevant": ["late-night-study", "focus-sprint"], "kind": "synonym"},
+    {"q": "tunes for the subway ride to the office", "relevant": ["commute"], "kind": "synonym"},
+    {"q": "chilling on the couch doing nothing", "relevant": ["chill-hangout"], "kind": "synonym"},
+    {"q": "getting dressed up before we hit the clubs", "relevant": ["pregame-hype", "house-party-dance"], "kind": "synonym"},
+    {"q": "curled up with a good novel", "relevant": ["reading-fiction"], "kind": "synonym"},
+    {"q": "bubble bath and candles tonight", "relevant": ["self-care-evening"], "kind": "synonym"},
+    {"q": "songs that remind me of being a kid", "relevant": ["nostalgia-throwback"], "kind": "synonym"},
+    {"q": "fighting the final boss in elden ring", "relevant": ["gaming-boss-fight"], "kind": "synonym"},
+    {"q": "twelve hour flight to tokyo", "relevant": ["long-flight"], "kind": "synonym"},
+    {"q": "rise and shine, fresh start", "relevant": ["morning-sunshine"], "kind": "synonym"},
+
+    {"q": "sad songs for a road trip", "relevant": ["road-trip-day", "rainy-day-melancholy", "heartbreak", "night-drive"], "kind": "multi_intent"},
+    {"q": "chill music for cooking dinner with my partner", "relevant": ["cooking-kitchen", "romantic-date", "chill-hangout"], "kind": "multi_intent"},
+    {"q": "upbeat music to clean the house before the party", "relevant": ["cleaning-chores", "house-party-dance"], "kind": "multi_intent"},
+    {"q": "calm music for a long train ride while I read", "relevant": ["long-flight", "reading-fiction"], "kind": "multi_intent"},
+
+    {"q": "música tranquila para estudiar", "relevant": ["late-night-study"], "kind": "non_english"},
+    {"q": "musique pour dormir", "relevant": ["sleep-wind-down"], "kind": "non_english"},
+    {"q": "Musik zum Joggen", "relevant": ["running-cardio"], "kind": "non_english"},
+    {"q": "canciones para una fiesta en la playa", "relevant": ["summer-beach", "house-party-dance"], "kind": "non_english"},
+
+    {"q": "I am late for my dentist appointment", "relevant": [], "kind": "off_topic"},
+    {"q": "how do I file my tax return", "relevant": [], "kind": "off_topic"},
+    {"q": "what is the capital of Australia", "relevant": [], "kind": "off_topic"},
+    {"q": "asdfghjkl qwerty", "relevant": [], "kind": "off_topic"},
+    {"q": "my car needs an oil change", "relevant": [], "kind": "off_topic"},
+    {"q": "recipe for chocolate chip cookies", "relevant": [], "kind": "off_topic"},
+    {"q": "is it going to snow on friday", "relevant": [], "kind": "off_topic"},
+    {"q": "translate hello into japanese", "relevant": [], "kind": "off_topic"}
+  ]
+}

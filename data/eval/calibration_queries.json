@@ -1,0 +1,34 @@
+{
+  "description": "Held-out queries used ONLY to calibrate each retriever's score scale (python -m src.index calibrate). Disjoint from retrieval_gold.json so the evaluation never scores a retriever on the queries its thresholds were fitted to.",
+  "queries": [
+    {"q": "background music while I do my homework", "relevant": ["late-night-study"]},
+    {"q": "heavy lifting session at the weight room", "relevant": ["gym-workout"]},
+    {"q": "something gloomy for a grey afternoon", "relevant": ["rainy-day-melancholy"]},
+    {"q": "driving through the city at midnight", "relevant": ["night-drive"]},
+    {"q": "throwing a birthday party tonight", "relevant": ["house-party-dance"]},
+    {"q": "so frustrated I want to scream", "relevant": ["angry-release"]},
+    {"q": "help me unwind at bedtime", "relevant": ["sleep-wind-down"]},
+    {"q": "debugging a nasty bug all day", "relevant": ["coding-deep-work"]},
+    {"q": "doing the laundry and dishes", "relevant": ["cleaning-chores"]},
+    {"q": "breathing and stretching on the mat", "relevant": ["yoga-stretch"]},
+    {"q": "belting out anthems in the shower", "relevant": ["karaoke-singalong"]},
+    {"q": "going for a 5k jog", "relevant": ["running-cardio"]},
+    {"q": "miss my ex so much", "relevant": ["heartbreak"]},
+    {"q": "baking bread on a sunday", "relevant": ["cooking-kitchen"]},
+    {"q": "walking to work through the city", "relevant": ["commute"]},
+    {"q": "sitting quietly in meditation", "relevant": ["meditation"]},
+    {"q": "anniversary dinner by candlelight", "relevant": ["romantic-date"]},
+    {"q": "windows down on a sunny highway", "relevant": ["road-trip-day"]},
+    {"q": "ranked matches all night", "relevant": ["gaming-boss-fight"]},
+    {"q": "pool day on vacation", "relevant": ["summer-beach"]},
+
+    {"q": "where is the nearest pharmacy", "relevant": []},
+    {"q": "my laptop battery keeps dying", "relevant": []},
+    {"q": "who won the election", "relevant": []},
+    {"q": "zxcvbn poiuy", "relevant": []},
+    {"q": "book a table for two at 7", "relevant": []},
+    {"q": "how many ounces in a cup", "relevant": []},
+    {"q": "remind me to call mom", "relevant": []},
+    {"q": "the printer is jammed again", "relevant": []}
+  ]
+}

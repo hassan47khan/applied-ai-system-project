@@ -172,3 +172,190 @@ class Retriever:
                 scored.append((card, sim))
         scored.sort(key=lambda item: (-item[1], item[0].id))
         return scored[:k]
+
+
+TfidfRetriever = Retriever   # the original VibeFinder 2.0 retriever, kept as the offline baseline
+
+# ---------------------------------------------------------------------------------------
+# VibeFinder 3.0 retrievers.
+#
+# The agent's thresholds (a 0.12 floor, 0.30 = "full evidence") were tuned on TF-IDF
+# cosine. Every other retriever maps its native score onto that same scale with a linear
+# calibration (native floor -> 0.12, native "clearly relevant" -> 0.30), computed from the
+# labelled queries in data/eval/retrieval_gold.json by `python -m src.index calibrate`.
+# So switching retrieval mode never silently changes what the agent counts as evidence.
+# ---------------------------------------------------------------------------------------
+EVIDENCE_FLOOR = 0.12
+EVIDENCE_FULL = 0.30
+BODY_ONLY_DISCOUNT = 0.4   # a card matched only through its prose, never its keywords/title
+
+
+@dataclass(frozen=True)
+class Calibration:
+    floor: float       # native score treated as the evidence floor
+    full: float        # native score treated as full evidence
+
+    def to_evidence(self, native: float) -> float:
+        span = max(1e-9, self.full - self.floor)
+        return max(0.0, EVIDENCE_FLOOR + (native - self.floor) / span * (EVIDENCE_FULL - EVIDENCE_FLOOR))
+
+
+class BM25Retriever:
+    """Okapi BM25 over the same weighted card tokens, with the same off-topic guard."""
+
+    name = "bm25"
+    DEFAULT_CALIBRATION = Calibration(floor=0.10, full=0.30)
+
+    def __init__(self, cards: List[Card], k1: float = 1.2, b: float = 0.75,
+                 calibration: Optional[Calibration] = None):
+        self.cards = cards
+        self.k1, self.b = k1, b
+        self.calibration = calibration or self.DEFAULT_CALIBRATION
+        n = len(cards)
+        self._tf = [Counter(c.tokens) for c in cards]
+        self._len = [len(c.tokens) for c in cards]
+        self._avg = (sum(self._len) / n) if n else 0.0
+        df: Counter = Counter()
+        for card in cards:
+            df.update(set(card.tokens))
+        # Lucene-style idf, which never goes negative for words most cards share.
+        self.idf = {t: math.log(1 + (n - d + 0.5) / (d + 0.5)) for t, d in df.items()}
+        # Words a card is *about* (its keywords and title), as opposed to words its prose
+        # happens to use. "good songs" must not match the cooking card on "feel-good".
+        self._topic = [set(tokenize(" ".join(c.keywords))) | set(tokenize(c.title)) for c in cards]
+        self.last_info: Dict[str, str] = {}
+
+    def native_scores(self, query: str) -> List[Tuple[Card, float]]:
+        """(card, BM25 normalised to [0, 1]) for every card, unsorted. [] if off-topic."""
+        q = Counter(tokenize(query, _QUERY_STOPWORDS))
+        known = sum(1 for t in q if t in self.idf)
+        if not q or known < MIN_QUERY_COVERAGE * len(q):
+            return []
+        # Divide by the best score any card could reach for this query (every term
+        # saturated), so scores are comparable across short and long requests.
+        ceiling = sum(self.idf.get(t, 0.0) * (self.k1 + 1) for t in q) or 1.0
+        out = []
+        for card, tf, length, topic in zip(self.cards, self._tf, self._len, self._topic):
+            score = 0.0
+            for t in q:
+                f = tf.get(t, 0)
+                if f:
+                    denom = f + self.k1 * (1 - self.b + self.b * length / (self._avg or 1.0))
+                    score += self.idf[t] * f * (self.k1 + 1) / denom
+            if score and not topic.intersection(q):
+                score *= BODY_ONLY_DISCOUNT
+            out.append((card, score / ceiling))
+        return out
+
+    def retrieve(self, query: str, k: int = 3, min_score: float = EVIDENCE_FLOOR) -> List[Tuple[Card, float]]:
+        self.last_info = {"mode": self.name}
+        scored = [(c, self.calibration.to_evidence(s)) for c, s in self.native_scores(query) if s > 0]
+        scored = [(c, s) for c, s in scored if s >= min_score]
+        scored.sort(key=lambda item: (-item[1], item[0].id))
+        return scored[:k]
+
+
+class DenseRetriever:
+    """Cosine similarity between a Gemini query embedding and the prebuilt card index.
+
+    `embed_query(text) -> vector` raises GeminiUnavailable when Gemini can't answer; the
+    caller (HybridRetriever or the agent) decides how to fall back."""
+
+    name = "dense"
+    DEFAULT_CALIBRATION = Calibration(floor=0.55, full=0.70)
+
+    def __init__(self, cards: List[Card], vectors: Dict[str, List[float]],
+                 embed_query, calibration: Optional[Calibration] = None):
+        self.cards = [c for c in cards if c.id in vectors]
+        self.vectors = vectors
+        self.embed_query = embed_query
+        self.calibration = calibration or self.DEFAULT_CALIBRATION
+        self.last_info: Dict[str, str] = {}
+
+    def native_scores(self, query: str) -> List[Tuple[Card, float]]:
+        qvec = self.embed_query(query)
+        return [(c, sum(a * b for a, b in zip(qvec, self.vectors[c.id]))) for c in self.cards]
+
+    def retrieve(self, query: str, k: int = 3, min_score: float = EVIDENCE_FLOOR) -> List[Tuple[Card, float]]:
+        self.last_info = {"mode": self.name}
+        scored = [(c, self.calibration.to_evidence(s)) for c, s in self.native_scores(query)]
+        scored = [(c, s) for c, s in scored if s >= min_score]
+        scored.sort(key=lambda item: (-item[1], item[0].id))
+        return scored[:k]
+
+
+def reciprocal_rank_fusion(rankings: List[List[str]], k: int = 60) -> Dict[str, float]:
+    """RRF: the sum of 1 / (k + rank) over every ranking a document appears in (rank from 1)."""
+    fused: Dict[str, float] = {}
+    for ranking in rankings:
+        for rank, doc_id in enumerate(ranking, start=1):
+            fused[doc_id] = fused.get(doc_id, 0.0) + 1.0 / (k + rank)
+    return fused
+
+
+def mmr_select(candidates: List[str], relevance: Dict[str, float], similarity,
+               k: int, lam: float = 0.7) -> List[str]:
+    """Maximal Marginal Relevance: trade relevance against similarity to what is already picked."""
+    picked: List[str] = []
+    pool = list(candidates)
+    top = max(relevance.values(), default=1.0) or 1.0
+    while pool and len(picked) < k:
+        def gain(doc_id: str) -> float:
+            redundancy = max((similarity(doc_id, p) for p in picked), default=0.0)
+            return lam * relevance[doc_id] / top - (1 - lam) * redundancy
+        best = max(pool, key=lambda d: (gain(d), -pool.index(d)))   # ties keep the fused order
+        picked.append(best)
+        pool.remove(best)
+    return picked
+
+
+class HybridRetriever:
+    """Lexical (BM25) + dense, fused with Reciprocal Rank Fusion, diversified with MMR.
+
+    * A card's reported score is the best calibrated evidence any arm gave it, so the
+      agent's floor still means "at least one retriever is confident about this card".
+    * If there is no dense arm or Gemini fails, this behaves exactly like the lexical
+      retriever, and `last_info["fallback"]` says why (the agent puts it in its trace).
+    """
+
+    name = "hybrid"
+
+    def __init__(self, lexical, dense: Optional[DenseRetriever] = None,
+                 rrf_k: int = 60, pool: int = 8, mmr_lambda: float = 0.7):
+        self.lexical = lexical
+        self.dense = dense
+        self.rrf_k, self.pool, self.mmr_lambda = rrf_k, pool, mmr_lambda
+        self.cards = lexical.cards
+        self.last_info: Dict[str, str] = {}
+
+    def retrieve(self, query: str, k: int = 3, min_score: float = EVIDENCE_FLOOR) -> List[Tuple[Card, float]]:
+        lexical_hits = self.lexical.retrieve(query, k=self.pool, min_score=min_score)
+        if self.dense is None:
+            self.last_info = {"mode": "lexical", "fallback": "no embedding index"}
+            return lexical_hits[:k]
+        try:
+            dense_hits = self.dense.retrieve(query, k=self.pool, min_score=min_score)
+        except Exception as exc:   # GeminiUnavailable or anything else: degrade, don't fail
+            reason = getattr(exc, "reason", None) or type(exc).__name__
+            self.last_info = {"mode": "lexical", "fallback": reason}
+            return lexical_hits[:k]
+
+        self.last_info = {"mode": self.name}
+        evidence: Dict[str, float] = {}
+        by_id: Dict[str, Card] = {}
+        for card, score in lexical_hits + dense_hits:
+            by_id[card.id] = card
+            evidence[card.id] = max(evidence.get(card.id, 0.0), score)
+        if not evidence:
+            return []
+        fused = reciprocal_rank_fusion([[c.id for c, _ in lexical_hits], [c.id for c, _ in dense_hits]],
+                                       k=self.rrf_k)
+        order = sorted(fused, key=lambda d: (-fused[d], -evidence[d], d))
+        vectors = self.dense.vectors
+
+        def similarity(a: str, b: str) -> float:
+            va, vb = vectors.get(a), vectors.get(b)
+            return sum(x * y for x, y in zip(va, vb)) if va and vb else 0.0
+
+        chosen = mmr_select(order, fused, similarity, k, self.mmr_lambda)
+        return [(by_id[d], evidence[d]) for d in chosen]

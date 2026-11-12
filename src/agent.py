@@ -28,7 +28,7 @@ from .profile import Profile, build_profile, strip_negated
 from .recommender import (
     NUMERIC_ATTRS, genre_affinity, load_songs, max_score, numeric_distance, rank_songs,
 )
-from .retrieval import Card, Retriever, load_cards
+from .retrieval import Card, load_cards
 
 log = logging.getLogger("vibefinder.agent")
 
@@ -68,6 +68,7 @@ class AgentResult:
     message: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
     trace: List[Dict] = field(default_factory=list)
+    retrieval_mode: str = ""
 
     @property
     def top_titles(self) -> List[str]:
@@ -98,11 +99,20 @@ class VibeFinderAgent:
         explainer: Optional[Explainer] = None,
         k: int = 5,
         use_retrieval: bool = True,
+        retrieval_mode: Optional[str] = None,
+        retriever=None,
     ):
         self.songs = songs if songs is not None else load_songs()
         cards = cards if cards is not None else load_cards()
         self.cards = cards if use_retrieval else []
-        self.retriever = Retriever(self.cards) if self.cards else None
+        self.retrieval_notes: List[str] = []
+        if retriever is not None:
+            self.retriever = retriever if use_retrieval else None
+        elif self.cards:
+            from .embeddings import make_retriever   # imported late: pulls in the Gemini client
+            self.retriever, self.retrieval_notes = make_retriever(self.cards, mode=retrieval_mode)
+        else:
+            self.retriever = None
         self.explainer = explainer or TemplateExplainer()
         self.k = k
         self.genre_vocab = sorted({s["genre"] for s in self.songs})
@@ -164,6 +174,12 @@ class VibeFinderAgent:
         result.retrieved = [(c.id, round(s, 3)) for c, s in retrieved]
         _step(result, "retrieve", ", ".join(f"{c.id} ({s:.2f})" for c, s in retrieved)
               or "no context card matched")
+        info = dict(getattr(self.retriever, "last_info", None) or {})
+        if info:
+            result.retrieval_mode = info.get("mode", "")
+            why = info.get("fallback") or "; ".join(self.retrieval_notes)
+            _step(result, "route", f"retrieval={info.get('mode')}"
+                  + (f" (fallback: {why})" if why and info.get("fallback") else ""))
         profile = build_profile(text, retrieved, self.genre_vocab, self.mood_vocab)
         _step(result, "plan", profile.describe())
         return retrieved, profile

@@ -1,0 +1,9 @@
+{
+  "bm25": {
+    "balanced_accuracy": 0.975,
+    "floor": 0.1087,
+    "full": 0.6394,
+    "n_negative": 8,
+    "n_positive": 20
+  }
+}
