@@ -21,7 +21,7 @@ from typing import List, NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 IGNORE = shutil.ignore_patterns(".git", ".venv", "venv", "env", "__pycache__", ".pytest_cache",
-                                "logs", "tools")
+                                "logs", "tools", ".cache", ".taste-skill")
 
 
 class Mutation(NamedTuple):
@@ -90,7 +90,8 @@ MUTATIONS: List[Mutation] = [
              'tokenize(" ".join(card.keywords)) * 3 + tokenize(card.title) * 2',
              'tokenize(" ".join(card.keywords)) + tokenize(card.title)'),
     Mutation("retrieval: no id tie-break", "src/retrieval.py",
-             "scored.sort(key=lambda item: (-item[1], item[0].id))", "scored.sort(key=lambda item: -item[1])"),
+             "scored.append((card, sim))\n        scored.sort(key=lambda item: (-item[1], item[0].id))",
+             "scored.append((card, sim))\n        scored.sort(key=lambda item: -item[1])"),
     Mutation("retrieval: query coverage check off", "src/retrieval.py",
              "MIN_QUERY_COVERAGE = 0.5", "MIN_QUERY_COVERAGE = 0.0"),
     # guardrails
@@ -107,8 +108,8 @@ MUTATIONS: List[Mutation] = [
              'text += f" Context ({card.title}): {card.guidance}"', "pass"),
     Mutation("llm: prompt drops the grounding instruction", "src/llm.py",
              "do not invent details about the song or artist.", "feel free to embellish."),
-    Mutation("llm: --llm without a key crashes", "src/llm.py",
-             "        return GeminiExplainer()\n    except Exception", "        return GeminiExplainer()\n    except ZeroDivisionError"),
+    Mutation("llm: --llm without a key uses an unusable client", "src/llm.py",
+             "    if not client.available:\n", "    if False:\n"),
     # profile builder and negation
     Mutation("profile: second card always blended", "src/profile.py",
              "SECONDARY_CARD_RATIO = 0.6", "SECONDARY_CARD_RATIO = 0.0"),
@@ -134,10 +135,46 @@ MUTATIONS: List[Mutation] = [
              '        lines.append(f"  [guardrail] {w}")\n', "        pass\n"),
     Mutation("main: message not shown", "src/main.py",
              '        lines += _wrap("  >> ", result.message, 6)\n', "        pass\n"),
-    Mutation("evaluate: check() always passes", "src/evaluate.py", "    return failures\n", "    return []\n"),
+    Mutation("evaluate: check() always passes", "src/evaluate.py",
+             "missing\")\n    return failures\n", "missing\")\n    return []\n"),
     Mutation("evaluate: --strict ignored", "src/evaluate.py",
-             "return 1 if (args.strict and passed != total) else 0", "return 0"),
+             "return 1 if (args.strict and (passed != total or injection_failures)) else 0", "return 0"),
     Mutation("log_setup: no log file", "src/log_setup.py", "        root.addHandler(file_handler)\n", "        pass\n"),
+
+    # VibeFinder 3.0: retrieval
+    Mutation("bm25: body-only matches not discounted", "src/retrieval.py",
+             "                score *= BODY_ONLY_DISCOUNT\n", "                pass\n"),
+    Mutation("hybrid: fallback reason dropped", "src/retrieval.py",
+             'self.last_info = {"mode": "lexical", "fallback": reason}', 'self.last_info = {"mode": "lexical"}'),
+    Mutation("rrf: rank fusion ignores the k constant", "src/retrieval.py", "1.0 / (k + rank)", "1.0 / rank"),
+    Mutation("mmr: redundancy ignored", "src/retrieval.py",
+             "return lam * relevance[doc_id] / top - (1 - lam) * redundancy", "return relevance[doc_id]"),
+    Mutation("index: edited cards not detected", "src/embeddings.py",
+             'elif entry.get("sha") != card_sha(card):', "elif False:"),
+    # Gemini client
+    Mutation("gemini: no retry on rate limit", "src/gemini.py",
+             "if _is_transient(exc) and attempt < self.max_attempts:", "if False:"),
+    Mutation("gemini: cache never read", "src/gemini.py",
+             "        cached = self.cache.get(key)\n", "        cached = None\n"),
+    # understanding and injection defences
+    Mutation("understanding: ranges not clamped", "src/understanding.py",
+             "clamped = (min(1.0, max(0.0, lo)), min(1.0, max(0.0, hi)))", "clamped = (lo, hi)"),
+    Mutation("understanding: instruction-like paraphrase kept", "src/understanding.py",
+             "if any(p.search(cleaned) for p in _INJECTION_PATTERNS):", "if False:"),
+    Mutation("agent: flagged input sent to Gemini", "src/agent.py",
+             'if any("instruction-override" in w for w in result.warnings):', "if False:"),
+    Mutation("guardrails: invisible characters kept", "src/guardrails.py",
+             'text = unicodedata.normalize("NFKC", _INVISIBLE.sub("", raw))', "text = raw"),
+    Mutation("agent: distress not flagged for review", "src/agent.py",
+             " or bool(result.support)", ""),
+    # explanations and conversation
+    Mutation("explain: invented numbers accepted", "src/llm.py", "        if invented:\n", "        if False:\n"),
+    Mutation("explain: foreign card citations accepted", "src/llm.py",
+             'if cited not in {"none", card.id if card else "none"}:', "if False:"),
+    Mutation("session: dismissed songs forgotten", "src/session.py",
+             "self.dismissed |= {shown_ids[r - 1] for r in ref.drop_ranks}", "pass"),
+    Mutation("session: 'more upbeat' moves the wrong way", "src/session.py",
+             "center = _clamp(center + direction * STEP)", "center = _clamp(center - direction * STEP)"),
 ]
 
 

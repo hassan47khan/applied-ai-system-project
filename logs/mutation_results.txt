@@ -1,0 +1,66 @@
+killed    agent: rejected songs not filtered
+killed    agent: diversity re-rank disabled
+killed    agent: diversity ignores artist
+killed    agent: no relaxation penalty
+killed    agent: evidence always 1.0
+killed    agent: never revise on conflict
+killed    agent: relaxation not flagged for review
+killed    agent: card choice ignores song
+killed    agent: CONFIDENCE_MIN 0.60 -> 0.30
+killed    agent: retrieval floor removed
+killed    agent: unsatisfiable never raised
+killed    agent: conflict tolerance 0.25 -> 0.9
+killed    agent: unsatisfiable note dropped from message
+killed    agent: recommendation fit not clamped
+killed    agent: confidence rounded across the threshold
+killed    agent: retrieval sees rejected phrases
+killed    recommender: no title tie-break
+killed    recommender: context mood weight 0
+killed    recommender: explicit mood ignored
+killed    recommender: avoid penalty hits related genres
+killed    recommender: Recommender ignores acoustic preference
+killed    recommender: explanation is junk
+killed    retrieval: no field weighting
+killed    retrieval: no id tie-break
+killed    retrieval: query coverage check off
+killed    guardrails: whitespace not collapsed
+killed    guardrails: 'you are now' not detected
+killed    guardrails: truncation cuts mid-word
+killed    llm: trade-offs not separated
+killed    llm: template drops the card guidance
+killed    llm: prompt drops the grounding instruction
+killed    llm: --llm without a key uses an unusable client
+killed    profile: second card always blended
+killed    profile: second card never blended
+killed    profile: card clash gap 0.15 -> 0.9
+killed    profile: copy() drops context_clash
+killed    profile: any comma ends a rejected list
+killed    profile: 'not less X' not flipped
+killed    profile: 'less X' read as a rejection
+killed    main: review flag always 'no'
+killed    main: --json prints repr
+killed    main: --k not clamped
+killed    main: guardrail warnings not shown
+killed    main: message not shown
+killed    evaluate: check() always passes
+killed    evaluate: --strict ignored
+killed    log_setup: no log file
+killed    bm25: body-only matches not discounted
+killed    hybrid: fallback reason dropped
+killed    rrf: rank fusion ignores the k constant
+killed    mmr: redundancy ignored
+killed    index: edited cards not detected
+killed    gemini: no retry on rate limit
+killed    gemini: cache never read
+killed    understanding: ranges not clamped
+killed    understanding: instruction-like paraphrase kept
+killed    agent: flagged input sent to Gemini
+killed    guardrails: invisible characters kept
+killed    agent: distress not flagged for review
+killed    explain: invented numbers accepted
+killed    explain: foreign card citations accepted
+killed    session: dismissed songs forgotten
+killed    session: 'more upbeat' moves the wrong way
+
+63/63 mutations killed
+exit=0

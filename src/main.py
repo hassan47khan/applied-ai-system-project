@@ -5,12 +5,17 @@ VibeFinder 3.0 command line.
     python -m src.main --demo            # three built-in example requests
     python -m src.main --interactive     # keep asking until you type 'quit'
     python -m src.main --trace "..."     # also print the agent's step-by-step trace
-    python -m src.main --llm "..."       # Gemini-written explanations (needs GEMINI_API_KEY)
+    python -m src.main --offline "..."   # never call Gemini, even with GEMINI_API_KEY set
+    python -m src.main --retrieval bm25 "..."   # tfidf | bm25 | dense | hybrid
+
+With GEMINI_API_KEY set (in the environment or .env), Gemini reads the request, embeds it
+for retrieval and writes the explanations; without it everything runs offline.
     python -m src.main --json "..."      # machine-readable output
 """
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 from typing import List
@@ -76,7 +81,11 @@ def main(argv=None) -> int:
     parser.add_argument("--demo", action="store_true", help="run built-in example requests")
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--trace", action="store_true", help="print the agent's step-by-step trace")
-    parser.add_argument("--llm", action="store_true", help="use Gemini for explanations if available")
+    parser.add_argument("--llm", action="store_true",
+                        help="kept for 2.0 compatibility; Gemini is now used whenever a key is set")
+    parser.add_argument("--offline", action="store_true", help="never call Gemini")
+    parser.add_argument("--retrieval", choices=["tfidf", "bm25", "dense", "hybrid"],
+                        help="retrieval mode (default: VIBEFINDER_RETRIEVAL or hybrid)")
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
     parser.add_argument("--k", type=int, default=5, help="number of recommendations (default 5)")
     args = parser.parse_args(argv)
@@ -88,7 +97,10 @@ def main(argv=None) -> int:
 
     setup_logging()
     try:
-        agent = VibeFinderAgent(explainer=make_explainer(args.llm), k=max(1, min(args.k, 10)))
+        if args.offline:
+            os.environ["VIBEFINDER_USE_GEMINI"] = "0"    # read when the shared client is created
+        agent = VibeFinderAgent(explainer=make_explainer(not args.offline), k=max(1, min(args.k, 10)),
+                                retrieval_mode=args.retrieval)
     except (OSError, ValueError) as exc:
         print(f"Could not start VibeFinder: {exc}", file=sys.stderr)
         return 2

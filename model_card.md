@@ -1,6 +1,45 @@
-# Model Card: VibeFinder 2.0
+# Model Card: VibeFinder 3.0
 
-*Extends VibeFinder 1.0 (Module 3 Music Recommender Simulation). The original model card is preserved in this repo's git history, at commit `12213e3`.*
+*Extends VibeFinder 2.0 (sections 1-9 below, kept as written for 2.0) and 1.0 (Module 3; original card at commit `12213e3`). Section 0 describes what 3.0 changes. Where it contradicts a 2.0 section, section 0 wins.*
+
+## 0. VibeFinder 3.0
+
+| | |
+|---|---|
+| **Type** | The 2.0 agent with Gemini query understanding, hybrid retrieval (BM25 + Gemini embeddings, RRF, MMR), batched grounded explanations, multi-turn refinement and a Streamlit UI |
+| **Models** | Generation: `gemini-flash-latest`, falling back to `gemini-flash-lite-latest`, then `gemini-2.5-flash`. Embeddings: `gemini-embedding-2` at 768 dimensions, falling back to `gemini-embedding-001`. All are optional: without a key the 2.0 offline path runs |
+| **Input** | Free text in any language (at most 300 characters), or a follow-up to the previous answer |
+| **Data** | `data/songs.csv`: 580 real tracks from the BSD-licensed Hugging Face `maharshipandya/spotify-tracks-dataset`, curated deterministically by `tools/build_catalog.py` (see `data/CATALOG_PROVENANCE.md`). `data/knowledge/`: 30 hand-written context cards. Cover art and previews come from Deezer's public API at display time; no audio is stored or redistributed |
+
+**What Gemini does and does not do.**
+- **Understanding.** It reads the request into an enum-constrained intent: genres and moods from the catalog only, feature ranges clamped to [0, 1], plus a short English paraphrase used for retrieval.
+- **Retrieval.** It embeds the request for dense retrieval and, optionally, rates the candidate context cards.
+- **Explanations.** It writes the explanations.
+- **What it never does.** It never ranks songs, computes confidence or decides whether an answer needs review. That is all deterministic code, unchanged in spirit from 2.0.
+
+**The changed safety surface.** The 2.0 card says the user's text never reaches an LLM. That is **no longer true**: since 3.0 the sanitised request is sent to Gemini for understanding and rerank. It is still never sent for explanations. Mitigations:
+1. Input the guardrail flags as an override attempt is never sent to Gemini. The guardrail applies Unicode NFKC normalisation and strips zero-width and bidirectional characters, which defeated the 2.0 detector.
+2. The request is delimited, and the system instruction declares it data.
+3. Output must match a JSON schema whose values are the catalog's own enums. A validator then drops anything else, clamps numbers and discards instruction-like paraphrases.
+4. Nothing Gemini writes as free text reaches the scorer. Its explanations are shown only after validation (title present, at most 70 words, cites only its own card, no number absent from its facts), and each one falls back to the template on its own.
+5. A 26-attack suite (`data/eval/injection_suite.json`) runs in the tests against a fully hijacked fake model, and live with `python -m src.evaluate --injection`.
+
+**Sensitive input.** A statement of self-harm or suicidal intent is not refused. The answer carries a short pointer to the 988 Suicide & Crisis Lifeline (US) and findahelpline.com, and is flagged for review. Detection is keyword-based: it will miss indirect phrasings, and it is a pointer to help, not a safety system.
+
+**New limitations and biases.**
+- **Catalog bias.** Popularity-first selection from a snapshot of Spotify around 2022 over-represents English-language, mainstream releases. Some genres are thin, or are defined by Spotify's tags rather than by sound: the jazz tag includes show tunes such as *Alexander Hamilton*.
+- **Mood is inferred** from valence, energy, acousticness and instrumentalness, never labelled by a person.
+- **Gemini quality.** It varies with the model behind the `-latest` alias, which Google can change. Runs are cached, so a fixed cache reproduces exactly, but a cold cache after a model update may not.
+- **Free-tier quota** is unpublished and tight. When it runs out the system silently returns to the offline path. The trace and the UI say so, but the answers get worse for synonyms and other languages.
+- **Follow-up parsing** is rule-based and covers a fixed set of phrasings. Anything else is treated as a new request.
+- **Previews depend on Deezer's catalog.** 24 of 25 sampled tracks matched. A miss shows a placeholder, never a wrong cover: weak matches are rejected.
+
+**Testing for 3.0.**
+- 384 offline tests.
+- 63 mutations; the tool fails on any mutant the suite doesn't catch.
+- A 44-query labelled retrieval benchmark with its calibration fitted on a disjoint query set.
+- Offline: 33/33 behaviour checks, with 7 Gemini-only cases skipped and reported as such, and 26/26 injection attacks handled.
+- Gemini-path results are reported in the README once run with a key.
 
 ## 1. Model overview
 
