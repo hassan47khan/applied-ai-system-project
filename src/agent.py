@@ -22,9 +22,10 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from .gemini import GeminiUnavailable
 from .guardrails import sanitize_query
 from .llm import Explainer, TemplateExplainer
-from .profile import Profile, build_profile, strip_negated
+from .profile import Profile, apply_context, build_profile, parse_explicit, strip_negated
 from .recommender import (
     NUMERIC_ATTRS, genre_affinity, load_songs, max_score, numeric_distance, rank_songs,
 )
@@ -69,6 +70,10 @@ class AgentResult:
     warnings: List[str] = field(default_factory=list)
     trace: List[Dict] = field(default_factory=list)
     retrieval_mode: str = ""
+    parser: str = "rules"                  # "gemini" or "rules"
+    support: Optional[str] = None          # crisis-support pointer when distress is detected
+    intent: Optional[Dict] = None          # the validated Gemini intent, when used
+    disagreements: List[str] = field(default_factory=list)
 
     @property
     def top_titles(self) -> List[str]:
@@ -101,6 +106,7 @@ class VibeFinderAgent:
         use_retrieval: bool = True,
         retrieval_mode: Optional[str] = None,
         retriever=None,
+        understander="auto",
     ):
         self.songs = songs if songs is not None else load_songs()
         cards = cards if cards is not None else load_cards()
@@ -117,6 +123,13 @@ class VibeFinderAgent:
         self.k = k
         self.genre_vocab = sorted({s["genre"] for s in self.songs})
         self.mood_vocab = sorted({s["mood"] for s in self.songs})
+        if understander == "auto":
+            from .gemini import shared_client
+            from .understanding import GeminiUnderstander
+            client = shared_client()
+            understander = (GeminiUnderstander(client, self.genre_vocab, self.mood_vocab)
+                            if client.available else None)
+        self.understander = understander
 
     # ------------------------------------------------------------------ run
     def run(self, text) -> AgentResult:
@@ -160,13 +173,40 @@ class VibeFinderAgent:
                               "e.g. 'something calm for studying' or 'upbeat pop for a workout'.")
             return None
         result.cleaned_query = cleaned.text
+        result.support = cleaned.support
         _step(result, "guardrail", "input accepted"
               + (f" with warnings: {'; '.join(cleaned.warnings)}" if cleaned.warnings else ""))
         return cleaned.text
 
+    def _understand(self, text: str, result: AgentResult):
+        """2a. Gemini reads the request; on any failure the rule-based parser takes over."""
+        if self.understander is None:
+            return None
+        if any("instruction-override" in w for w in result.warnings):
+            # Defence in depth: text that already looks like an attack never reaches the LLM.
+            _step(result, "understand", "rule-based parser (input flagged by guardrail; not sent to Gemini)")
+            return None
+        try:
+            intent = self.understander.parse(text)
+        except GeminiUnavailable as exc:
+            _step(result, "understand", f"rule-based parser (fallback: {exc.reason})")
+            return None
+        result.parser = "gemini"
+        result.intent = {k: v for k, v in vars(intent).items()}
+        _step(result, "understand", "gemini: " + intent.describe()
+              + (f"; validator dropped {', '.join(intent.dropped)}" if intent.dropped else ""))
+        return intent
+
     def _plan(self, text: str, result: AgentResult) -> Tuple[List[Tuple[Card, float]], Profile]:
-        """2. Retrieve context cards (rejected phrases removed first) and build the profile."""
-        retrieval_text = strip_negated(text, self.genre_vocab, self.mood_vocab)
+        """2. Understand the request, retrieve context cards, build the profile."""
+        intent = self._understand(text, result)
+        if intent is not None and not intent.on_topic:
+            _step(result, "plan", "gemini judged the request off-topic; not retrieving")
+            return [], Profile()
+        if intent is not None and intent.english_paraphrase:
+            retrieval_text = intent.english_paraphrase   # rejected things already left out
+        else:
+            retrieval_text = strip_negated(text, self.genre_vocab, self.mood_vocab)
         retrieved = (
             self.retriever.retrieve(retrieval_text, k=3, min_score=RETRIEVAL_MIN_SCORE)
             if self.retriever else []
@@ -180,7 +220,17 @@ class VibeFinderAgent:
             why = info.get("fallback") or "; ".join(self.retrieval_notes)
             _step(result, "route", f"retrieval={info.get('mode')}"
                   + (f" (fallback: {why})" if why and info.get("fallback") else ""))
-        profile = build_profile(text, retrieved, self.genre_vocab, self.mood_vocab)
+        if intent is None:
+            profile = build_profile(text, retrieved, self.genre_vocab, self.mood_vocab)
+        else:
+            from .understanding import disagreements, profile_from_intent
+            explicit = profile_from_intent(intent, self.genre_vocab)
+            diffs = disagreements(parse_explicit(text, self.genre_vocab, self.mood_vocab), explicit)
+            if diffs:
+                result.disagreements = diffs
+                _step(result, "cross-check", "rule parser read it differently: " + "; ".join(diffs))
+                _log_disagreement(text, diffs)
+            profile = apply_context(explicit, retrieved)
         _step(result, "plan", profile.describe())
         return retrieved, profile
 
@@ -190,6 +240,8 @@ class VibeFinderAgent:
         _step(result, "decide", why)
         result.profile = profile.describe()
         result.needs_review = True
+        if result.support:
+            message = result.support + " " + message
         result.issues = [issue]
         result.message = message
         return result
@@ -236,7 +288,7 @@ class VibeFinderAgent:
         result.confidence = _shown(attempt.confidence)
         result.issues = [code for code, _ in attempt.issues]
         issue_text = dict(attempt.issues)
-        result.needs_review = bool(result.relaxations) or bool(attempt.issues)
+        result.needs_review = bool(result.relaxations) or bool(attempt.issues) or bool(result.support)
 
         chosen_cards = [c for c, _ in attempt.profile.cards]
         for rank, (song, score, reasons) in enumerate(attempt.picks, start=1):
@@ -322,6 +374,19 @@ class VibeFinderAgent:
             if song["genre"] in card.genres or song["mood"] in card.moods:
                 return card
         return cards[0] if cards else None
+
+
+def _log_disagreement(text: str, diffs: List[str]) -> None:
+    """Append to logs/parser_disagreements.jsonl: a running record of where Gemini and the
+    rules differ, for spotting regressions in either."""
+    import json
+    from .log_setup import LOG_DIR
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(LOG_DIR / "parser_disagreements.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"query": text, "diffs": diffs}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def _shown(confidence: float) -> float:

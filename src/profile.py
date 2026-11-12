@@ -356,7 +356,17 @@ def build_profile(
     mood_vocab: Sequence[str],
 ) -> Profile:
     """Merge explicit signals with the retrieved context cards into one scoring profile."""
-    profile = parse_explicit(text, genre_vocab, mood_vocab)
+    return apply_context(parse_explicit(text, genre_vocab, mood_vocab), retrieved)
+
+
+def widen_rejection(genre: str, genre_vocab: Sequence[str]) -> List[str]:
+    """Rejecting "pop" also rules out indie pop, latin pop and synth pop (same rule as the
+    rule-based parser applies to typed rejections)."""
+    return _containing(genre.lower(), genre_vocab) or [genre]
+
+
+def apply_context(profile: Profile, retrieved: List[Tuple[Card, float]]) -> Profile:
+    """Blend the retrieved context cards into an explicit profile (in place; returns it)."""
     if not retrieved:
         return profile
 

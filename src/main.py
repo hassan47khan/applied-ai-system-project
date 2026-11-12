@@ -1,5 +1,5 @@
 """
-VibeFinder 2.0 command line.
+VibeFinder 3.0 command line.
 
     python -m src.main "something calm for studying late at night"
     python -m src.main --demo            # three built-in example requests
@@ -35,15 +35,19 @@ def _wrap(prefix: str, text: str, indent: int) -> List[str]:
 
 
 def format_result(result: AgentResult, show_trace: bool = False) -> str:
-    lines = ["=" * WIDTH, "  VibeFinder 2.0", f'  Request: "{result.cleaned_query or result.query}"', "=" * WIDTH]
+    lines = ["=" * WIDTH, "  VibeFinder 3.0", f'  Request: "{result.cleaned_query or result.query}"', "=" * WIDTH]
     for w in result.warnings:
         lines.append(f"  [guardrail] {w}")
+    if result.support:
+        lines += _wrap("  [support] ", result.support, 12)
     if result.ok:
         ctx = ", ".join(f"{cid} ({score:.2f})" for cid, score in result.retrieved) or "none"
         lines.append(f"  Retrieved context : {ctx}")
         lines += _wrap("  Search profile    : ", result.profile, 22)
         lines.append(f"  Confidence        : {result.confidence:.2f}   "
                      f"Needs human review: {'YES' if result.needs_review else 'no'}")
+        if result.parser == "gemini" or (result.retrieval_mode and result.retrieval_mode != "tfidf"):
+            lines.append(f"  Understood by     : {result.parser}   retrieval: {result.retrieval_mode or 'none'}")
     for rec in result.recommendations:
         song = rec.song
         lines.append("")
@@ -67,7 +71,7 @@ def format_result(result: AgentResult, show_trace: bool = False) -> str:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="VibeFinder 2.0: retrieval-grounded music recommender")
+    parser = argparse.ArgumentParser(description="VibeFinder 3.0: retrieval-grounded music recommender")
     parser.add_argument("query", nargs="*", help="what you want to listen to")
     parser.add_argument("--demo", action="store_true", help="run built-in example requests")
     parser.add_argument("--interactive", action="store_true")
@@ -101,7 +105,7 @@ def main(argv=None) -> int:
             handle(q)
             print()
     elif args.interactive or not args.query:
-        print("VibeFinder 2.0 - describe what you want to hear ('quit' to exit).")
+        print("VibeFinder 3.0 - describe what you want to hear ('quit' to exit).")
         while True:
             try:
                 text = input("> ")
