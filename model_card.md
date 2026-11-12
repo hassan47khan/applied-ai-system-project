@@ -35,7 +35,7 @@
 - **Previews depend on Deezer's catalog.** 24 of 25 sampled tracks matched. A miss shows a placeholder, never a wrong cover: weak matches are rejected.
 
 **Testing for 3.0.**
-- 384 offline tests.
+- 388 offline tests.
 - 63 mutations; the tool fails on any mutant the suite doesn't catch.
 - A 44-query labelled retrieval benchmark with its calibration fitted on a disjoint query set.
 - Offline: 33/33 behaviour checks, with 7 Gemini-only cases skipped and reported as such, and 26/26 injection attacks handled.
