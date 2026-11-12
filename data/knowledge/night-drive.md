@@ -1,11 +1,11 @@
 ---
 id: night-drive
-title: Night drives and road trips
-keywords: drive, driving, night, road, trip, roadtrip, highway, cruise, cruising, car, city, lights, neon, midnight, commute
-genres: synthwave, indie pop
-moods: moody
-energy: 0.65-0.80
-danceability: 0.65-0.80
-acousticness: 0.10-0.35
+title: Night drive
+keywords: drive, driving, night drive, road trip, highway, midnight, city lights, neon, cruising, car, late night drive
+genres: synth pop, electronic, indie rock, house
+moods: moody, energetic
+energy: 0.55-0.85
+danceability: 0.50-0.80
+acousticness: 0.00-0.30
 ---
-Night driving pairs well with a moody, mid-to-high energy electronic pulse that feels cinematic. Synth-heavy tracks with a steady tempo keep the road rhythm going without being aggressive.
+Night driving suits moody, propulsive music with synths and a steady beat that matches the road. Mid-high energy keeps you alert while the darker tone fits city lights and empty highways.

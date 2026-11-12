@@ -1,11 +1,11 @@
 ---
 id: world-travel
-title: Travel and exploring
-keywords: travel, traveling, exploring, explore, adventure, festival, market, culture, world, abroad, trip, journey, wandering
-genres: world fusion, latin pop
-moods: energetic, happy
-energy: 0.70-0.85
-danceability: 0.70-0.85
-acousticness: 0.35-0.55
+title: World music and travel
+keywords: travel, traveling, world, abroad, culture, cultures, international, global, adventure, exploring, passport
+genres: world fusion, latin, reggae
+moods: happy, energetic, chill
+energy: 0.40-0.85
+danceability: 0.50-0.85
+acousticness: 0.20-0.80
 ---
-Exploring new places pairs with lively, rhythmic music that blends acoustic and electronic textures. World fusion carries a sense of movement and discovery.
+Travel and exploration pair with music from many traditions: afrobeat, Indian fusion, samba and reggae. Rhythm-forward, often acoustic textures carry a sense of place.

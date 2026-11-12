@@ -28,6 +28,14 @@ _NORMALISE = [
     (re.compile(r"[‘’ʼ]"), "'"),   # phones and macOS type curly apostrophes
     (re.compile(r"\s+"), " "),
     (re.compile(r"\blo[- ]fi\b"), "lofi"),
+    # Spellings of the real-catalog genres (data/songs.csv).
+    (re.compile(r"\bk[- ]?pop\b"), "kpop"),
+    (re.compile(r"\bhip[- ]?hop\b"), "hip hop"),
+    (re.compile(r"\bsynth[- ]?pop\b"), "synth pop"),
+    (re.compile(r"\b(?:drum (?:and|&|n|'n') bass|dnb|d&b|drum ?n ?bass)\b"), "drum and bass"),
+    (re.compile(r"(?:\br ?& ?b\b|\brnb\b)"), "soul"),
+    # A "house party" is a party, not a request for house music.
+    (re.compile(r"\bhouse part(?:y|ies)\b"), "party"),
     # Idioms built from negation words that reject nothing: "nothing less than loud" means
     # loud, and "more or less acoustic" means acoustic.
     (re.compile(r"\b(?:nothing|no) less than\b"), " "),
@@ -36,7 +44,7 @@ _NORMALISE = [
 
 # Words of multi-word genres that also mean something else, so alone they don't name a genre
 # ("classic rock", "around the world", and "electronic" is already a feature word below).
-_AMBIGUOUS_GENRE_WORDS = frozenset({"classic", "world", "electronic"})
+_AMBIGUOUS_GENRE_WORDS = frozenset({"classic", "world", "electronic", "and", "drum", "bass"})
 
 # What starts a rejection. Everything from here to the end of the clause is rejected.
 _NEGATION_CUE = re.compile(

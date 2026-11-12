@@ -1,11 +1,11 @@
 ---
 id: house-party-dance
-title: Parties and dancing
-keywords: party, parties, dance, dancing, danceable, club, celebrate, celebration, friends, birthday, hangout, bounce, groove, crowd
-genres: pop, latin pop, indie pop, world fusion
-moods: happy, energetic
-energy: 0.75-0.95
-danceability: 0.78-0.95
-acousticness: 0.10-0.45
+title: House party and dancing
+keywords: party, house party, dance, dancing, club, clubbing, celebrate, celebration, birthday, friends over, rave
+genres: edm, house, latin pop, kpop, pop, funk
+moods: energetic, happy
+energy: 0.70-1.00
+danceability: 0.72-1.00
+acousticness: 0.00-0.25
 ---
-Party music needs a high danceability and an upbeat, positive feel so a crowd keeps moving. Bright pop and latin rhythms with a clear, steady beat work for mixed groups.
+Parties need high-energy, highly danceable tracks with a clear four-on-the-floor or reggaeton pulse. Big choruses and bright production keep a room moving. Slow or acoustic songs empty the dance floor.

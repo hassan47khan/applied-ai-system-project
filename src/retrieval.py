@@ -10,6 +10,7 @@ changes which songs rank first (it is not printed next to a standard answer).
 
 import logging
 import math
+import os
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -20,7 +21,7 @@ from .recommender import NUMERIC_ATTRS, ROOT
 
 log = logging.getLogger("vibefinder.retrieval")
 
-DEFAULT_KNOWLEDGE_DIR = ROOT / "data" / "knowledge"
+DEFAULT_KNOWLEDGE_DIR = Path(os.environ.get("VIBEFINDER_KNOWLEDGE") or ROOT / "data" / "knowledge")
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = frozenset(

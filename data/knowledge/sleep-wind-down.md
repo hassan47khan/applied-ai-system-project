@@ -1,11 +1,11 @@
 ---
 id: sleep-wind-down
 title: Sleep and winding down
-keywords: sleep, sleeping, sleepy, bedtime, relax, relaxing, unwind, calm, meditation, meditate, stress, stressed, anxious, peaceful, yoga, spa, tired
-genres: ambient, ambient electronic, lofi
-moods: chill
-energy: 0.15-0.35
-danceability: 0.25-0.45
-acousticness: 0.70-0.95
+keywords: sleep, sleeping, bedtime, bed, insomnia, wind down, unwind, nap, falling asleep, night, tired
+genres: ambient, classical, piano
+moods: focused, relaxed, melancholy
+energy: 0.00-0.30
+danceability: 0.10-0.50
+acousticness: 0.60-1.00
 ---
-Winding down is best served by very slow, soft and spacious music with almost no rhythmic push. Ambient textures lower arousal and make it easier to settle.
+Falling asleep is easiest with very low-energy, slow, mostly acoustic or ambient music. No beat, no surprises and soft dynamics let the body settle. Anything danceable or loud keeps the brain awake.

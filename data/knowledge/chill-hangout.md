@@ -1,11 +1,11 @@
 ---
 id: chill-hangout
-title: Chill hangouts and lazy afternoons
-keywords: chill, hang, hanging, lounge, background, mellow, lazy, sunday, easy, afternoon, laid-back, lowkey, vibe, vibes
-genres: lofi, jazz, indie folk
-moods: chill, relaxed
-energy: 0.30-0.50
-danceability: 0.45-0.65
-acousticness: 0.65-0.90
+title: Chill hangout
+keywords: chill, chilling, hangout, hanging out, relax, relaxing, lazy, laid back, sunday, lounge, vibe, vibes
+genres: lofi, soul, reggae, indie pop
+moods: chill, relaxed, happy
+energy: 0.30-0.60
+danceability: 0.55-0.85
+acousticness: 0.15-0.70
 ---
-Laid-back afternoons suit mellow, warm music with an easy tempo that sits in the background. Lofi, jazz and folk textures keep things comfortable without demanding attention.
+A relaxed hangout suits laid-back grooves with a light bounce. Lofi beats, smooth soul and easy reggae keep things mellow but still warm and social.

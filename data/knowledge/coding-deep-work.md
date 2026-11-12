@@ -1,11 +1,11 @@
 ---
 id: coding-deep-work
 title: Coding and deep work
-keywords: coding, code, programming, developer, debugging, deep, work, working, productivity, flow, project, laptop
-genres: lofi, ambient electronic
-moods: focused
-energy: 0.25-0.45
-danceability: 0.30-0.62
-acousticness: 0.65-0.80
+keywords: code, coding, programming, programmer, developer, debugging, deep work, flow, work, working, productivity, office
+genres: electronic, lofi, ambient, techno
+moods: focused, chill
+energy: 0.30-0.65
+danceability: 0.45-0.80
+acousticness: 0.00-0.50
 ---
-Deep work calls for a steady, unobtrusive groove that keeps rhythm in the background. Lofi and electronic ambient tracks with a moderate acoustic warmth help people hold a long stretch of concentration.
+Deep work needs a steady, repetitive groove that fades into the background once you are in flow. Instrumental electronic music, minimal techno and lofi beats give momentum without words to parse. Mid tempo and moderate energy beat both silence-quiet ambient and peak-hour club tracks.

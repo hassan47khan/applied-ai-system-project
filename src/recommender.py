@@ -12,12 +12,14 @@ Changes relative to the base project (see model_card.md for the reasoning):
 """
 
 import csv
+import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SONGS_PATH = ROOT / "data" / "songs.csv"
+# VIBEFINDER_SONGS points the app (or the test suite) at a different catalog.
+DEFAULT_SONGS_PATH = Path(os.environ.get("VIBEFINDER_SONGS") or ROOT / "data" / "songs.csv")
 
 # --- Scoring weights --------------------------------------------------------
 GENRE_WEIGHT = 1.5           # genre the user explicitly named
@@ -86,6 +88,11 @@ def _parse_song(row: Dict) -> Dict:
         song[key] = row[key]
     for key in ("energy", "tempo_bpm", "valence", "danceability", "acousticness"):
         song[key] = float(row[key])
+    # Optional columns from the real-data catalog (tools/build_catalog.py).
+    if row.get("popularity"):
+        song["popularity"] = int(row["popularity"])
+    if row.get("track_id"):
+        song["track_id"] = row["track_id"]
     return song
 
 

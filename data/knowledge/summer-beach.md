@@ -1,11 +1,11 @@
 ---
 id: summer-beach
-title: Summer and beach days
-keywords: summer, beach, vacation, tropical, holiday, sunny, pool, bbq, cookout, sun, miami, latin, ocean, holiday
-genres: latin pop, world fusion, pop
+title: Summer at the beach
+keywords: beach, summer, sun, sunny, ocean, sea, vacation, holiday, tropical, island, pool, poolside, surf
+genres: reggae, reggaeton, latin pop, latin, world fusion
 moods: happy, energetic
-energy: 0.75-0.90
-danceability: 0.80-0.95
-acousticness: 0.15-0.50
+energy: 0.60-0.90
+danceability: 0.65-0.95
+acousticness: 0.00-0.50
 ---
-Sunny-weather listening leans on warm, rhythmic, upbeat tracks with a festive feel. Latin and world rhythms bring sunshine energy that is easy to move to.
+Beach days and summer vacations want sunny, danceable music with an easy, swaying rhythm. Reggae, reggaeton and latin grooves bring warmth and movement without the intensity of a club.

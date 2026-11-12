@@ -17,3 +17,8 @@ venv/
 # Secrets and runtime logs
 .env
 logs/vibefinder.log*
+
+# Downloaded datasets and Gemini response cache (rebuildable)
+.cache/
+logs/runs.jsonl
+logs/parser_disagreements.jsonl
