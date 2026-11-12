@@ -55,6 +55,15 @@ def _path(env: str, default: Path) -> Path:
     return Path(value) if value else default
 
 
+_PLACEHOLDER_KEYS = {"your_api_key_here", "your-api-key", "changeme", "xxx", "<your key>"}
+
+
+def _real_key(value: Optional[str]) -> Optional[str]:
+    """None for a missing key or the .env.example placeholder (a doomed API call per request)."""
+    value = (value or "").strip()
+    return None if not value or value.lower() in _PLACEHOLDER_KEYS else value
+
+
 def _flag(env: str, default: bool) -> bool:
     value = os.environ.get(env)
     if value is None or value == "":
@@ -71,7 +80,7 @@ class Settings:
     retrieval_mode: str = field(default_factory=lambda: os.environ.get("VIBEFINDER_RETRIEVAL", "hybrid"))
     rerank: bool = field(default_factory=lambda: _flag("VIBEFINDER_RERANK", False))
     use_gemini: bool = field(default_factory=lambda: _flag("VIBEFINDER_USE_GEMINI", True))
-    api_key: Optional[str] = field(default_factory=lambda: os.environ.get("GEMINI_API_KEY") or None)
+    api_key: Optional[str] = field(default_factory=lambda: _real_key(os.environ.get("GEMINI_API_KEY")))
     generation_models: Tuple[str, ...] = GENERATION_MODELS
     embedding_models: Tuple[str, ...] = EMBEDDING_MODELS
     embedding_dim: int = EMBEDDING_DIM

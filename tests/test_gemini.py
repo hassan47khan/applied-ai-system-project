@@ -114,3 +114,10 @@ def test_dotenv_never_overrides_the_real_environment(tmp_path, monkeypatch):
 def test_invalid_retrieval_mode_is_rejected():
     with pytest.raises(ValueError):
         Settings(retrieval_mode="magic")
+
+
+@pytest.mark.parametrize("value", ["your_api_key_here", "  ", "", None])
+def test_a_placeholder_or_blank_key_counts_as_no_key(value):
+    from src.config import _real_key
+    assert _real_key(value) is None
+    assert _real_key("AIzaRealLookingKey") == "AIzaRealLookingKey"
