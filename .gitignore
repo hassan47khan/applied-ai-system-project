@@ -22,3 +22,6 @@ logs/vibefinder.log*
 .cache/
 logs/runs.jsonl
 logs/parser_disagreements.jsonl
+
+# Design tooling working files
+.taste-skill/

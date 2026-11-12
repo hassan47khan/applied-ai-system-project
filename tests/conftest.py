@@ -28,6 +28,7 @@ os.environ["VIBEFINDER_RETRIEVAL"] = "tfidf"
 os.environ["VIBEFINDER_USE_GEMINI"] = "0"
 os.environ["VIBEFINDER_RERANK"] = "0"
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["VIBEFINDER_NO_MEDIA"] = "1"     # no Deezer calls from tests
 
 
 def pytest_unconfigure(config):
