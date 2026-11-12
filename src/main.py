@@ -93,8 +93,12 @@ def main(argv=None) -> int:
         print(f"Could not start VibeFinder: {exc}", file=sys.stderr)
         return 2
 
+    from .session import Conversation
+    conversation = Conversation(agent)
+
     def handle(text: str) -> None:
-        result = agent.run(text)
+        # Interactive mode keeps context, so "more upbeat" or "not #3" refines the last answer.
+        result = conversation.send(text) if args.interactive or not args.query else agent.run(text)
         if args.json:
             print(json.dumps(asdict(result), indent=2, default=str))
         else:
@@ -105,7 +109,8 @@ def main(argv=None) -> int:
             handle(q)
             print()
     elif args.interactive or not args.query:
-        print("VibeFinder 3.0 - describe what you want to hear ('quit' to exit).")
+        print("VibeFinder 3.0 - describe what you want to hear ('quit' to exit, 'reset' to start over).")
+        print("Follow-ups refine the last answer: 'more upbeat', 'less jazz', 'not #3', 'more like #2'.")
         while True:
             try:
                 text = input("> ")
@@ -114,6 +119,9 @@ def main(argv=None) -> int:
                 break
             if text.strip().lower() in {"quit", "exit", "q"}:
                 break
+            if text.strip().lower() == "reset":
+                conversation.reset()
+                continue
             handle(text)
     else:
         handle(" ".join(args.query))

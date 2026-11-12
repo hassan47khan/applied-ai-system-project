@@ -52,6 +52,8 @@ class Recommendation:
     fit: float
     reasons: List[str]
     explanation: str
+    explained_by: str = "template"       # "gemini" or "template"
+    cited_card: Optional[str] = None
 
 
 @dataclass
@@ -141,6 +143,7 @@ class VibeFinderAgent:
             return result
 
         retrieved, profile = self._plan(cleaned, result)
+        result._profile = profile       # not a dataclass field: kept out of --json output
         if not profile.has_signal:
             return self._stop(result, profile, "no_signal", "no usable preferences found; refusing to guess",
                               "I couldn't tell what you're after, so I won't guess. Try adding an "
@@ -155,6 +158,30 @@ class VibeFinderAgent:
                               if self.songs else "The song catalog is empty, so I have nothing to recommend.")
 
         attempt = self._act_verify_revise(profile, candidates, retrieved, result)
+        self._decide(attempt, result)
+        return result
+
+    def refine(self, profile: Profile, label: str, exclude_ids=()) -> AgentResult:
+        """Re-rank from an edited profile (multi-turn refinement, see session.py).
+
+        Skips guardrail/understanding/retrieval: the profile already carries the earlier
+        turn's context cards. Act, verify, revise and decide run exactly as in run()."""
+        result = AgentResult(query=label, cleaned_query=label, parser="refine")
+        result.retrieved = [(c.id, round(s, 3)) for c, s in profile.cards]
+        _step(result, "refine", label)
+        _step(result, "plan", profile.describe())
+        result._profile = profile
+        if not profile.has_signal:
+            return self._stop(result, profile, "no_signal", "refinement left no preferences",
+                              "That leaves me nothing to go on. Try describing what you want to hear.")
+        excluded = set(exclude_ids)
+        candidates = [s for s in self.songs if profile.allows(s) and s["id"] not in excluded]
+        if len(candidates) < len(self.songs):
+            _step(result, "filter", f"removed {len(self.songs) - len(candidates)} rejected or already-dismissed songs")
+        if not candidates:
+            return self._stop(result, profile, "no_candidates", "no songs left to recommend",
+                              "Nothing in the catalog is left after those changes.")
+        attempt = self._act_verify_revise(profile, candidates, profile.cards, result)
         self._decide(attempt, result)
         return result
 
@@ -291,12 +318,24 @@ class VibeFinderAgent:
         result.needs_review = bool(result.relaxations) or bool(attempt.issues) or bool(result.support)
 
         chosen_cards = [c for c, _ in attempt.profile.cards]
-        for rank, (song, score, reasons) in enumerate(attempt.picks, start=1):
+        cards = [self._card_for(song, chosen_cards) for song, _, _ in attempt.picks]
+        batch = getattr(self.explainer, "explain_batch", None)
+        explained = (batch([(song, reasons, card) for (song, _, reasons), card in zip(attempt.picks, cards)])
+                     if batch else None)
+        for rank, ((song, score, reasons), card) in enumerate(zip(attempt.picks, cards), start=1):
+            if explained:
+                text, source, cited = explained[rank - 1]
+            else:
+                text, source, cited = self.explainer.explain(song, reasons, card), "template", None
             result.recommendations.append(Recommendation(
                 rank=rank, song=song, score=round(score, 2),
                 fit=round(max(0.0, min(1.0, score / attempt.ceiling)), 2), reasons=reasons,
-                explanation=self.explainer.explain(song, reasons, self._card_for(song, chosen_cards)),
+                explanation=text, explained_by=source, cited_card=cited,
             ))
+        if explained:
+            n = sum(src == "gemini" for _, src, _ in explained)
+            _step(result, "explain", f"gemini wrote {n}/{len(explained)} explanations"
+                  + (f"; {len(explained) - n} fell back to the template" if n < len(explained) else ""))
 
         notes = [f"I relaxed a preference you gave: {relaxation}. Tell me if the original "
                  f"genre matters more than the feel you described." for relaxation in result.relaxations]

@@ -4,8 +4,11 @@ Explanation layer.
 TemplateExplainer is the default: deterministic, offline, and grounded in the score
 reasons plus the retrieved context card.
 
-GeminiExplainer is optional (set GEMINI_API_KEY and pass --llm). It only rewrites the
-facts it is handed into friendlier prose. Guardrails:
+GroundedBatchExplainer (VibeFinder 3.0, used when GEMINI_API_KEY is set) explains all picks
+in one call with per-pick validation; see its docstring.
+
+GeminiExplainer is the original per-song 2.0 explainer, kept for compatibility. It only
+rewrites the facts it is handed into friendlier prose. Guardrails:
   * the prompt contains ONLY song fields, score reasons and the card's guidance text;
     the user's raw request is never included, so injected instructions can't reach it
   * the reply must be short and mention the song title, otherwise we fall back to the template
@@ -14,7 +17,8 @@ facts it is handed into friendlier prose. Guardrails:
 
 import logging
 import os
-from typing import Dict, List, Optional, Protocol
+import re
+from typing import Dict, List, Optional, Protocol, Tuple
 
 from .retrieval import Card
 
@@ -79,12 +83,108 @@ class GeminiExplainer:
         return text
 
 
+_NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)?")
+_BATCH_SYSTEM = (
+    "You write short, friendly explanations of why a music recommender picked each song. "
+    "Use ONLY the facts given for that song: its title, artist, genre, mood, the scoring reasons and "
+    "the listening context. Do not invent anything about the artist, lyrics, era, instruments or "
+    "popularity, and do not quote any number that is not in the facts. Each explanation: one or two "
+    "sentences, at most 40 words, and it must contain the song title exactly as given."
+)
+
+
+def _facts_numbers(song: Dict, reasons: List[str], card: Optional[Card]) -> set:
+    text = " ".join([str(song.get(k, "")) for k in ("title", "artist", "genre", "mood")] + reasons
+                    + ([card.title, card.guidance] if card else []))
+    found = set(_NUMBER.findall(text))
+    for key in ("energy", "danceability", "acousticness", "valence", "tempo_bpm"):
+        if key in song:
+            found |= {f"{song[key]:g}", f"{song[key]:.2f}", f"{song[key]:.0f}"}
+    return found
+
+
+class GroundedBatchExplainer:
+    """One Gemini call explains every pick, each grounded in its own facts and context card.
+
+    Per explanation the validator checks: the title is present, it is short, it cites only
+    the card it was given (or none), and it contains no number that isn't in its facts
+    (an invented "released in 1998" or "120 BPM" is rejected). Any explanation that fails
+    falls back to the template on its own; the rest are kept. Like the 2.0 explainer, the
+    prompt holds only catalog facts and card text, never the user's raw request.
+    """
+
+    def __init__(self, client, fallback: Optional[Explainer] = None):
+        self.client = client
+        self.fallback = fallback or TemplateExplainer()
+        self.last_sources: List[str] = []
+
+    def explain(self, song: Dict, reasons: List[str], card: Optional[Card]) -> str:
+        return self.explain_batch([(song, reasons, card)])[0][0]
+
+    def explain_batch(self, items: List[Tuple[Dict, List[str], Optional[Card]]]) -> List[Tuple[str, str, Optional[str]]]:
+        """[(text, source, cited_card_id)] in the same order; source is "gemini" or "template"."""
+        fallbacks = [self.fallback.explain(s, r, c) for s, r, c in items]
+        card_ids = sorted({c.id for _, _, c in items if c is not None}) + ["none"]
+        blocks = []
+        for i, (song, reasons, card) in enumerate(items):
+            blocks.append(
+                f"[{i}] {song['title']} by {song['artist']} ({song['genre']}, {song['mood']})\n"
+                f"    reasons: {'; '.join(reasons) or 'closest available option'}\n"
+                f"    context card: {card.id + ' - ' + card.title + ': ' + card.guidance if card else 'none'}")
+        schema = {"type": "object", "properties": {"explanations": {"type": "array", "items": {
+            "type": "object", "properties": {
+                "index": {"type": "integer", "minimum": 0, "maximum": max(0, len(items) - 1)},
+                "text": {"type": "string"},
+                "cited_card": {"type": "string", "enum": card_ids}},
+            "required": ["index", "text", "cited_card"]}}}, "required": ["explanations"]}
+        try:
+            data = self.client.generate_json("\n".join(blocks), schema, purpose="explain",
+                                             system=_BATCH_SYSTEM, temperature=0.3)
+        except Exception as exc:   # GeminiUnavailable and anything unexpected
+            log.warning("Batched explanations unavailable (%s); using templates", getattr(exc, "reason", exc))
+            self.last_sources = ["template"] * len(items)
+            return [(t, "template", None) for t in fallbacks]
+
+        out: List[Tuple[str, str, Optional[str]]] = [(t, "template", None) for t in fallbacks]
+        entries = data.get("explanations", []) if isinstance(data, dict) else []
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            i, text, cited = entry.get("index"), entry.get("text"), entry.get("cited_card")
+            if not isinstance(i, int) or not 0 <= i < len(items) or not isinstance(text, str):
+                continue
+            song, reasons, card = items[i]
+            problem = self._check(text.strip(), cited, song, reasons, card)
+            if problem:
+                log.warning("Explanation for %r rejected: %s", song["title"], problem)
+                continue
+            out[i] = (text.strip(), "gemini", card.id if card and cited == card.id else None)
+        self.last_sources = [src for _, src, _ in out]
+        return out
+
+    @staticmethod
+    def _check(text: str, cited, song: Dict, reasons: List[str], card: Optional[Card]) -> Optional[str]:
+        if not text:
+            return "empty"
+        if song["title"].lower() not in text.lower():
+            return "title missing"
+        if len(text.split()) > MAX_EXPLANATION_WORDS:
+            return "too long"
+        if cited not in {"none", card.id if card else "none"}:
+            return f"cites a card it was not given ({cited})"
+        invented = set(_NUMBER.findall(text)) - _facts_numbers(song, reasons, card)
+        if invented:
+            return f"invented numbers {sorted(invented)}"
+        return None
+
+
 def make_explainer(use_llm: bool) -> Explainer:
     """Gemini if requested and available, otherwise the offline template."""
     if not use_llm:
         return TemplateExplainer()
-    try:
-        return GeminiExplainer()
-    except Exception as exc:
-        log.warning("LLM explanations unavailable (%s); using offline templates", exc)
+    from .gemini import shared_client
+    client = shared_client()
+    if not client.available:
+        log.warning("LLM explanations unavailable (%s); using offline templates", client.unavailable_reason())
         return TemplateExplainer()
+    return GroundedBatchExplainer(client)
