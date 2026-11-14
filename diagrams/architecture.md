@@ -39,7 +39,7 @@ flowchart TD
         KB[(30 context cards<br/>data/knowledge)]
         IDX[(Prebuilt card index<br/>data/index, committed)]
         BM[BM25<br/>body-only discount]
-        DN[Dense cosine]
+        DN[Dense: centred cosine<br/>empty query never embedded]
         HY[Hybrid: RRF + MMR<br/>calibrated to one evidence scale]
         KB --> BM --> HY
         IDX --> DN --> HY

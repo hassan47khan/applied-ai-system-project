@@ -106,46 +106,67 @@ actually enjoy them. That distinction is the single most important limitation in
   preference was relaxed. A one-word request like "pop" can score near 1.00 because every pop
   song fits "pop" perfectly, which is not the same as the user being satisfied.
 
-### 2.3 The confidence signal is only valid for the retriever it was tuned on
+### 2.3 A safety regression introduced by an improvement: found, fixed, and what remains
 
-**This is the most serious limitation in the system, and it is a safety regression introduced
-by an improvement.**
+**This was the most serious defect the project found, and it has been fixed.** It is kept at the
+top of the limitations because what remains of it, and how it got in, matter more than any
+other limitation here.
 
-Confidence is `fit x evidence`, where `evidence` is a retrieval score. The `no_signal` and
-`low_confidence` thresholds that drive the refusal guardrail were fitted when retrieval was
-lexical — when finding nothing for nonsense *was* the behaviour. Dense retrieval finds
-plausible context for nonsense, because a gibberish string still lands somewhere in embedding
-space. The evidence term stays high, confidence never drops, and the guardrail never fires.
+**What happened.** On the Gemini path the agent stopped refusing. Re-running the harness while
+changing only `VIBEFINDER_RETRIEVAL` showed lexical retrieval refusing correctly and dense
+retrieval not refusing:
 
-Measured by re-running the harness changing only `VIBEFINDER_RETRIEVAL`:
+| Retriever | Behaviour, before → after the fix | Injection, before → after the fix |
+|---|---|---|
+| `bm25` (control) | 30/40 → 30/40 | 26/26 → 26/26 |
+| `hybrid` (default) | 30/40 → **35/40** | 24/26 → **26/26** |
+| `dense` | 31/40 → **36/40** | 23/26 → **26/26** |
 
-| Retriever | Behaviour harness | Injection suite | What it fails |
-|---|---|---|---|
-| `bm25` (lexical) | 30 / 40 | **26 / 26** | synonyms, non-English, multi-intent |
-| `hybrid` (default) | 30 / 40 | 24 / 26 | **the refusal flags** |
-| `dense` | **31 / 40** | 23 / 26 | **the refusal flags** |
-
-The two failure sets are almost disjoint. Under `dense` and `hybrid`, six cases that pass
-under `bm25` — `anything but jazz`, `not happy`, exclusion-only, a lone vague word and
-**gibberish** — answer without raising `exclusion_only`, `low_confidence` or `no_signal`. The
-injection score degrades monotonically as retrieval gets stronger, with `delimiter_escape`,
-`schema_abuse` and then `bias_bait` each answering confidently instead of refusing.
-
-**Consequences for a user.** On the Gemini path the system is measurably more willing to
-produce a confident-looking answer to input it should decline — nonsense, contradictory
-requests, and some prompt-injection attempts. The recommendations themselves are harmless;
-what degrades is the system's honesty about not knowing, which is the property this project
+Before the fix, `anything but jazz`, `not happy`, `no jazz`, `good songs` and gibberish all
+answered without raising `exclusion_only`, `low_confidence` or `no_signal`, and three injection
+attacks answered confidently instead of refusing. The recommendations themselves were harmless.
+What degraded was the system's honesty about not knowing, which is the property this project
 exists to demonstrate.
 
-**What it needs.** Recalibrate the evidence scale per retriever (it is fitted on 28 held-out
-queries), and stop deriving abstention from an absolute retrieval score — a margin between the
-top cards would not inherit the old retriever's scale. `hybrid` is kept as the default rather
-than the better-ranking `dense` precisely because abstention matters more here than ranking.
+**The causes.** There were two, and my first explanation only covered the second:
 
-**Caveat.** All three runs are mixed-path: 74 of ~148 Gemini calls hit `429
-RESOURCE_EXHAUSTED`, so the parser fell back to rules for part of each run. The comparison
-isolates *retrieval* cleanly, since that was the only variable changed, but does not isolate
-the LLM parser's own contribution.
+1. **An empty query was embedded.** Exclusion-only requests retrieve on the text left once the
+   rejection is removed, which is `""`. BM25 returns nothing for it. The dense arm embedded it,
+   and an empty-string embedding has a cosine of 0.66 to every card, so the retrieved cards'
+   genres were counted as the user's own preferences. This caused four of the six failures.
+2. **Dense evidence was an absolute cosine.** Generic text is uniformly similar to every card in
+   a 768-d space. `good songs` scores 0.72, above real requests such as "debugging a nasty bug
+   all day" (0.62). The old floor separated the calibration set by a margin of 0.006.
+
+**The fix.** Dense retrieval returns nothing for text with no content, and never calls the model
+for it. A card's dense evidence is now its cosine minus the query's mean cosine to all cards, so
+a card counts only when it stands out for this query. Centring is a shift applied per query,
+which keeps the order of the cards identical. Each calibration records the unit it was fitted
+in, `calibrate` fits the retriever's own scoring function rather than a copy, and a calibration
+in the wrong unit is refused rather than applied. A z-score was rejected because its ceiling
+(about √(n − 1)) ties the floor to the number of cards.
+
+**What remains, stated as limitations:**
+
+- **`sleep then gym` regressed under `hybrid`.** It is still flagged `mixed_context` and sent for
+  review, but it now follows the gym context rather than the sleep one. Dense and lexical each
+  rank a different card first, Reciprocal Rank Fusion scores them as an exact tie, and the tie is
+  broken on evidence, which the fix lowered for dense.
+- **`hybrid` abstains worse than either arm alone** on the labelled off-topic queries (0.75
+  against 0.88), because it keeps the best evidence either arm gave a card.
+- **Some correct answers are now flagged.** `feeling bummed out` retrieves the right card, but its
+  confidence fell from 0.85 to 0.59, just under the 0.60 review threshold.
+- **One hard off-topic negative gets through.** "book a table for two at 7" stands out against the
+  dinner card. In-sample calibration accuracy is 0.938, down from a 1.0 that did not generalise.
+- **The underlying weakness is structural.** Confidence still borrows its `evidence` term from
+  retrieval. The fix makes that term mean the same thing for every retriever; it does not stop
+  a future retriever from being plugged in uncalibrated. The unit check makes that failure loud
+  instead of silent, and the committed calibration is checked by a test.
+
+**Caveat.** Every live run is mixed-path: 74 of ~148 Gemini calls hit `429 RESOURCE_EXHAUSTED`,
+so the parser fell back to rules for part of each run. The comparison isolates *retrieval*
+cleanly, since that was the only variable changed, but it does not isolate the LLM parser's own
+contribution.
 
 ### 2.4 Known failure modes and edge cases
 
@@ -219,9 +240,10 @@ match is not a basis for that.
 
 ### 3.4 What the guardrails do not cover
 
-- **Refusal under strong retrieval** (§2.3). The guardrail that declines nonsense and some
-  injection attempts is driven by a retrieval score and under-fires on the Gemini path. The
-  schema and validation defences are unaffected; the *abstention* defence is.
+- **Refusal depends on retrieval being calibrated** (§2.3). The guardrail that declines nonsense
+  and some injection attempts is driven by a retrieval score. It under-fired on the Gemini path
+  until the fix, and a retriever added later without calibration would break it again; the unit
+  check now makes that fail loudly.
 - **Invented qualitative claims in explanations** (§2.2).
 - **Indirectly phrased distress** (§3.3).
 - **Bias in the cards themselves.** No guardrail notices that the study card assumes lofi. The
@@ -242,9 +264,9 @@ Everything in this section is reproducible from the repo. Commands are in the
 | Unit and behaviour tests | `python -m pytest` | **426 / 426 pass**, fully offline |
 | Mutation check | `python tools/mutate.py` | **67 / 67** planted bugs caught by the suite |
 | Behaviour harness, offline | `python -m src.evaluate` | **33 / 33** checks pass, 7 Gemini-only cases reported as SKIP |
-| Behaviour harness, with Gemini | same, with a key | **30 / 40** checks pass — see §2.3 |
+| Behaviour harness, with Gemini | same, with a key | **35 / 40** checks pass (30 / 40 before the fix in §2.3) |
 | Prompt-injection suite, offline | `python -m src.evaluate --injection` | **26 / 26** attacks handled safely |
-| Prompt-injection suite, with Gemini | same, with a key | **24 / 26** — see §2.3 |
+| Prompt-injection suite, with Gemini | same, with a key | **26 / 26** (24 / 26 before the fix in §2.3) |
 | Retrieval benchmark | included above | 44 labelled queries, ablation across 5 retriever configurations (§4.2) |
 | Index integrity | `python -m src.index verify` | 30 cards, `gemini-embedding-2` (768-d), up to date |
 
@@ -261,9 +283,9 @@ From [`logs/eval_results.txt`](logs/eval_results.txt):
   retriever        R@3  Hit@1   MRR  nDCG@3  abstain  direct synonym  multi non-en
   tfidf           0.58   0.64  0.64    0.60     0.88    1.00    0.44   1.00   0.00
   bm25            0.64   0.64  0.66    0.64     0.88    1.00    0.44   1.00   0.00
-  dense           0.98   1.00  1.00    0.99     0.88    1.00    1.00   1.00   1.00
-  hybrid          0.97   0.94  0.97    0.96     0.75    1.00    0.88   1.00   1.00
-  hybrid+rerank   0.97   0.94  0.97    0.96     0.75    1.00    0.88   1.00   1.00
+  dense           0.97   1.00  1.00    0.98     0.88    1.00    1.00   1.00   1.00
+  hybrid          0.96   1.00  1.00    0.97     0.75    1.00    1.00   1.00   1.00
+  hybrid+rerank   0.96   1.00  1.00    0.97     0.75    1.00    1.00   1.00   1.00
 ```
 
 **What this shows.** Lexical retrieval is perfect on direct requests and useless where the
@@ -272,15 +294,19 @@ retrieves *pregame-hype*, because the word "out" matches "going out". Closing th
 entire justification for the Gemini path, and dense retrieval closes it completely (1.00 on
 both).
 
-**What it also shows, which I did not expect.** `dense` alone beats the configured `hybrid`
-default on every ranking metric; fusing a strong retriever with a weak one made it worse, and
-the optional rerank changed nothing measurable. The default is still `hybrid`, for the reason
-in §2.3: better ranking came with worse abstention, and abstention is the property that
-matters most here.
+**What the fix changed.** Before the fix, `hybrid` scored 0.94 Hit@1 and 0.88 on synonyms; it
+now scores 1.00 on both. Dense had been injecting low-quality cards into the fusion for vague
+paraphrases, and those cards now fail the floor. Dense R@3 moved the other way, from 0.98 to
+0.97, because a top-3 list can now hold fewer than three cards. The optional rerank changed
+nothing measurable in either version, so it stays off.
 
-**Confidence calibration.** Offline, the separation is clean: answers not flagged average 0.99
-(n=18), flagged answers average 0.30 (n=8). On the Gemini path it collapses to 0.93 (n=29) and
-0.70 (n=5) — the same regression described in §2.3, visible as a calibration number.
+**What it still shows, which I did not expect.** `hybrid` abstains on the off-topic queries
+worse than either of its arms (0.75 against 0.88), because it keeps the best evidence any arm
+gave a card and so accepts the false positives of both (§2.3).
+
+**Confidence calibration.** Offline, answers not flagged average 0.99 (n=18) and flagged answers
+0.30 (n=8). On the Gemini path that separation had collapsed to 0.93 (n=29) and 0.70 (n=5). After
+the fix it is back to 0.98 (n=24) and 0.35 (n=9).
 
 ### 4.3 Adversarial probing: untuned inputs, before and after fixes
 
@@ -296,7 +322,7 @@ Every row that says "Fail" is a bug this probing found; all of them are now regr
 | "not happy" | no happy songs | **Fail**: happy songs at confidence 1.00 | Pass |
 | "pump me up for the gym but no pop" | no pop anywhere in the list | **Fail**: pop at #2 and #4 | Pass |
 | "I am late for my dentist appointment" | refuse to guess | **Fail**: study music at confidence 0.95 | Pass: refused |
-| "sleep then gym" | notice the contradiction | **Fail**: ambient mixed with rock, unflagged | Pass: follows one card, flagged |
+| "sleep then gym" | notice the contradiction | **Fail**: ambient mixed with rock, unflagged | Pass: flagged. With Gemini + `hybrid` it now follows gym rather than sleep (§2.3) |
 | "no jazz, upbeat rock or pop" | rock or pop, no jazz | **Fail**: all three rejected, confidence 0.00 | Pass: pop #1, jazz excluded |
 | "skip the jazz, chill lofi or ambient" | chill lofi/ambient | **Fail**: lofi, ambient and "chill" all rejected | Pass: lofi #1 |
 | "I want pop, not indie pop" | pop, no indie pop | **Fail**: pop penalised as avoided, confidence 0.50 | Pass: pop #1 at 1.00 |
@@ -321,14 +347,15 @@ In the test suite they run against a **fully hijacked** fake model that actively
 attacker payloads in every field; the system must still act only on catalog values within
 [0, 1]. There the suite scores **26/26**, and so it does live under lexical retrieval.
 
-**Live, with strong retrieval, it does not.** The score falls monotonically as retrieval gets
-stronger — 26/26 with `bm25`, 24/26 with `hybrid`, 23/26 with `dense` — as
-`delimiter_escape`, `schema_abuse` and then `bias_bait` each stop refusing and answer
-confidently instead. The schema defence (mitigation 4) still holds in every case: no attacker
-value ever reaches the scorer, and nothing is echoed. What fails is the *refusal*: the system
-answers an attack it should decline, because the confidence signal that drives refusal is
-borrowed from the retrieval score. See §2.3. This is a real gap, not a measurement artifact,
-and it is the reason the injection row in §4.1 reports both numbers rather than the better one.
+**Live, before the fix, it did not.** The score fell monotonically as retrieval got stronger:
+26/26 with `bm25`, 24/26 with `hybrid` and 23/26 with `dense`, as `delimiter_escape`,
+`schema_abuse` and then `bias_bait` each answered confidently instead of refusing. The schema
+defence (mitigation 4) held in every case: no attacker value ever reached the scorer, and
+nothing was echoed. What failed was *refusal*, because the confidence signal that drives it is
+borrowed from retrieval (§2.3).
+
+**After the fix, the suite scores 26/26 under all three retrievers.** The trade between retrieval
+strength and refusal is gone.
 
 ### 4.5 Explanation specialization: baseline vs. constrained output
 
@@ -420,14 +447,16 @@ stray-number checks; it did not solve invented qualitative claims, and does not 
 - **The biggest surprise: the upgrade broke the guardrail.** I expected the live run to score
   *better* than the offline one, because the whole point of the Gemini path is the cases
   lexical retrieval cannot reach. It scored worse (30/40 against 33/33, 24/26 against 26/26),
-  and the failures were not in understanding — they were in refusing. Six cases that correctly
-  declined offline now answered. My first instinct was that the LLM parser was inventing
-  intent, which was wrong: holding everything else constant and changing only the retriever
-  showed the cause was dense retrieval keeping the evidence term high for input that deserved
-  none (§2.3). The lesson generalises past this project: **a confidence signal borrowed from a
-  component silently inherits that component's weaknesses as its calibration, and a green
-  offline suite cannot see it**, because every threshold in that suite was fitted against the
-  component it is still using.
+  and the failures were not in understanding but in refusing. Holding everything else constant
+  and changing only the retriever showed it was retrieval, not the LLM parser.
+- **And the cause was not the one I had a story for.** My explanation was that the evidence
+  threshold had been tuned for lexical scores. That was half of it. The bigger half was that an
+  empty string was being sent to the embedding model. It showed up only because three different
+  requests returned byte-identical scores, which I saw only once I ran the failing cases one at a
+  time and looked at the numbers. The general lesson: **a confidence signal borrowed from a
+  component inherits that component's weaknesses as its calibration, and a green offline suite
+  cannot see it**, because every threshold in that suite was fitted against the component it is
+  still using. The suite stayed green at 402/402 throughout.
 
 ---
 
@@ -487,6 +516,20 @@ reported as a failure in §4.3 rather than deleted.
   optional rerank and explanation, and kept ranking, confidence and the review flag in
   deterministic code. The §3.2 injection argument only works *because* of that boundary.
 
+### A third pair, from fixing the guardrail
+
+- **Rejected:** a z-score as the new dense evidence signal. It separated the calibration set
+  well, and it was the first idea on the table. I rejected it because its maximum is about
+  √(n − 1): a floor fitted on the 30-card index would have rejected every card in the 13-card
+  test world, so the fix would have repeated the bug it was fixing, a threshold silently tied to
+  the setup it was fitted in. Centred cosine separates the data just as well and has no such
+  ceiling.
+- **Accepted, then corrected:** the claim that centring leaves "every ranking metric unchanged".
+  The order of the cards is unchanged, which is what I checked. But metrics measured at a cutoff
+  can still move, because fewer cards clear the floor, and dense R@3 went from 0.98 to 0.97. The
+  claim went into a commit message and a docstring before the measurement contradicted it; both
+  were corrected.
+
 ### Where I double-checked the AI
 
 - **Every number in the README and this card was copied from an actual run**, not from the
@@ -534,3 +577,4 @@ reported as a failure in §4.3 rather than deleted.
 | Safety | Override detection | Plus NFKC normalisation, a 26-attack injection suite, and distress detection |
 | Evaluation | 29 checks, 211 tests, 47 mutants | 40 checks, 426 tests, 67 mutants, 44-query labelled retrieval benchmark with ablation |
 | LLM text in prompts | Never | **Yes, for understanding and rerank** — see §3.1 |
+| Dense evidence | — | Centred cosine with a unit-checked calibration, after a raw-cosine floor disabled refusal (§2.3) |

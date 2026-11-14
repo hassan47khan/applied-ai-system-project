@@ -275,8 +275,11 @@ class DenseRetriever:
     cannot separate those; it passed the calibration set by 0.006 and then let empty and
     vague queries through as evidence, which silently disabled the agent's refusal checks.
     What does separate them is whether one card *stands out* from the rest for this query.
-    Centring is a per-query shift, so the card ranking, and every ranking metric, is
-    unchanged: only which cards clear the floor changes.
+    Centring is a per-query shift, so the *order* of the cards never changes. What changes
+    is which cards clear the floor, and that can still move metrics measured at a cutoff:
+    a top-3 list can now hold fewer than three cards, which is why dense R@3 went from 0.98
+    to 0.97. Inside the hybrid it also changes how an exact RRF tie is broken, because ties
+    are broken on calibrated evidence.
 
     A centred score has no ceiling that depends on the number of cards, unlike a z-score
     (whose maximum is about sqrt(n - 1)), so a floor fitted on the 30-card index is not

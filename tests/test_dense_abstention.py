@@ -13,7 +13,8 @@ not. Two causes, each covered here:
    every card in a 768-d space (measured: "" scores 0.66 against its best card and
    "good songs" 0.72, both above real requests such as "debugging a nasty bug all day" at
    0.62). Dense now scores a card by how far it stands out from the query's mean similarity
-   to all cards (centred cosine), which ranks identically but abstains correctly.
+   to all cards (centred cosine). That keeps the card *order* identical and changes only
+   which cards clear the floor.
 """
 
 from __future__ import annotations
