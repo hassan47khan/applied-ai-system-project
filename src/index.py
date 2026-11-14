@@ -20,7 +20,7 @@ from .embeddings import (
 )
 from .gemini import GeminiUnavailable, shared_client
 from .log_setup import setup_logging
-from .retrieval import BM25Retriever, load_cards
+from .retrieval import BM25Retriever, DenseRetriever, load_cards
 from .retrieval_eval import CALIBRATION_QUERIES_PATH, fit_calibration, load_queries
 
 
@@ -61,11 +61,12 @@ def cmd_verify(settings) -> int:
 def cmd_calibrate(settings) -> int:
     cards = load_cards(settings.knowledge_dir)
     queries = load_queries(CALIBRATION_QUERIES_PATH)
-    calibrations = {name: {"floor": c.floor, "full": c.full}
+    calibrations = {name: {"floor": c.floor, "full": c.full, "signal": c.signal}
                     for name, c in load_calibration(settings.index_dir).items()}
 
     bm25 = BM25Retriever(cards)
     calibrations["bm25"] = fit_calibration(lambda q: {c.id: s for c, s in bm25.native_scores(q)}, queries)
+    calibrations["bm25"]["signal"] = "native"
     print(f"bm25  : {calibrations['bm25']}")
 
     index = load_index(cards, settings.index_dir)
@@ -78,10 +79,15 @@ def cmd_calibrate(settings) -> int:
         except GeminiUnavailable as exc:
             print(f"dense : skipped ({exc.reason})")
         else:
-            def dense_scores(q):
-                qv = vectors[q]
-                return {cid: sum(a * b for a, b in zip(qv, v)) for cid, v in index.vectors.items()}
-            calibrations["dense"] = fit_calibration(dense_scores, queries)
+            # Fit on DenseRetriever.native_scores itself, not on a re-implementation of it, so
+            # the calibration is always in the units retrieval actually thresholds on. (It once
+            # computed raw cosine here while retrieval used the same, and nothing checked that
+            # they agreed; changing either one alone would have mis-scaled every threshold.)
+            dense = DenseRetriever(cards, index.vectors, lambda q: vectors[q])
+            calibrations["dense"] = fit_calibration(
+                lambda q: {c.id: s for c, s in dense.native_scores(q)}, queries)
+            calibrations["dense"]["signal"] = DenseRetriever.SIGNAL
+            calibrations["dense"]["n_cards"] = len(dense.cards)
             print(f"dense : {calibrations['dense']}")
     else:
         print("dense : skipped (needs a usable index and GEMINI_API_KEY)")

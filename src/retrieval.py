@@ -194,6 +194,7 @@ BODY_ONLY_DISCOUNT = 0.4   # a card matched only through its prose, never its ke
 class Calibration:
     floor: float       # native score treated as the evidence floor
     full: float        # native score treated as full evidence
+    signal: str = "native"   # the unit floor/full are in; must match what the retriever emits
 
     def to_evidence(self, native: float) -> float:
         span = max(1e-9, self.full - self.floor)
@@ -255,29 +256,74 @@ class BM25Retriever:
         return scored[:k]
 
 
+def has_content(text: str) -> bool:
+    """Is there anything here to retrieve on? False for '', whitespace and bare punctuation."""
+    return any(ch.isalnum() for ch in text or "")
+
+
 class DenseRetriever:
-    """Cosine similarity between a Gemini query embedding and the prebuilt card index.
+    """Centred cosine similarity between a Gemini query embedding and the prebuilt card index.
 
     `embed_query(text) -> vector` raises GeminiUnavailable when Gemini can't answer; the
-    caller (HybridRetriever or the agent) decides how to fall back."""
+    caller (HybridRetriever or the agent) decides how to fall back.
+
+    Why the score is *centred* (a card's cosine minus the query's mean cosine to every card)
+    rather than raw cosine: in a 768-d embedding space every text is fairly similar to every
+    card, and short or generic text is uniformly so. Measured on the real index, the empty
+    string has a raw cosine of 0.66 to its best card and "good songs" 0.72, both higher than
+    real on-topic requests such as "debugging a nasty bug all day" (0.62). An absolute floor
+    cannot separate those; it passed the calibration set by 0.006 and then let empty and
+    vague queries through as evidence, which silently disabled the agent's refusal checks.
+    What does separate them is whether one card *stands out* from the rest for this query.
+    Centring is a per-query shift, so the card ranking, and every ranking metric, is
+    unchanged: only which cards clear the floor changes.
+
+    A centred score has no ceiling that depends on the number of cards, unlike a z-score
+    (whose maximum is about sqrt(n - 1)), so a floor fitted on the 30-card index is not
+    silently invalid for a smaller knowledge base.
+    """
 
     name = "dense"
-    DEFAULT_CALIBRATION = Calibration(floor=0.55, full=0.70)
+    SIGNAL = "centered"
+    # Fitted on data/eval/calibration_queries.json; `python -m src.index calibrate` refits it.
+    DEFAULT_CALIBRATION = Calibration(floor=0.0635, full=0.1382, signal=SIGNAL)
 
     def __init__(self, cards: List[Card], vectors: Dict[str, List[float]],
                  embed_query, calibration: Optional[Calibration] = None):
         self.cards = [c for c in cards if c.id in vectors]
         self.vectors = vectors
         self.embed_query = embed_query
+        if calibration is not None and calibration.signal != self.SIGNAL:
+            # A calibration fitted on raw cosine is in the wrong units for this score: applying
+            # it would put the floor near 0.6 on a scale where real matches sit near 0.1, and
+            # nothing would ever clear it. Refuse it loudly rather than mis-scale silently.
+            log.warning("Ignoring a dense calibration fitted on %r scores; this retriever emits %r. "
+                        "Run: python -m src.index calibrate", calibration.signal, self.SIGNAL)
+            calibration = None
         self.calibration = calibration or self.DEFAULT_CALIBRATION
         self.last_info: Dict[str, str] = {}
 
-    def native_scores(self, query: str) -> List[Tuple[Card, float]]:
+    def cosine_scores(self, query: str) -> List[Tuple[Card, float]]:
         qvec = self.embed_query(query)
         return [(c, sum(a * b for a, b in zip(qvec, self.vectors[c.id]))) for c in self.cards]
 
+    def native_scores(self, query: str) -> List[Tuple[Card, float]]:
+        """The score calibration is fitted on and retrieval thresholds: centred cosine."""
+        raw = self.cosine_scores(query)
+        if not raw:
+            return []
+        mean = sum(s for _, s in raw) / len(raw)
+        return [(c, s - mean) for c, s in raw]
+
     def retrieve(self, query: str, k: int = 3, min_score: float = EVIDENCE_FLOOR) -> List[Tuple[Card, float]]:
         self.last_info = {"mode": self.name}
+        if not has_content(query):
+            # Lexical retrieval returns nothing for an empty query by construction. Dense
+            # retrieval would happily embed "" and find it "similar" to every card, so the
+            # cards' genres would be counted as the user's preferences. This is what stopped
+            # "anything but jazz" (whose retrieval text is "" once the rejection is removed)
+            # from ever being flagged as exclusion-only. Match the lexical contract instead.
+            return []
         scored = [(c, self.calibration.to_evidence(s)) for c, s in self.native_scores(query)]
         scored = [(c, s) for c, s in scored if s >= min_score]
         scored.sort(key=lambda item: (-item[1], item[0].id))

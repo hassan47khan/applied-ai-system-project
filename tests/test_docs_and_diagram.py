@@ -194,3 +194,18 @@ def test_documented_test_count_matches_the_suite(pytestconfig) -> None:
         f"{collected['count']}. Update the count in README.md, model_card.md and "
         "diagrams/architecture.mmd (then re-embed the diagram into architecture.md)."
     )
+
+
+def test_committed_dense_calibration_is_in_the_units_retrieval_uses() -> None:
+    """A calibration fitted on raw cosine is refused at runtime with only a log warning, so
+    committing a stale one would quietly fall back to the default. Catch it here instead."""
+    import json
+
+    from src.retrieval import DenseRetriever
+
+    dense = json.loads((INDEX_DIR / "calibration.json").read_text(encoding="utf-8"))["dense"]
+    assert dense.get("signal") == DenseRetriever.SIGNAL, (
+        f"data/index/calibration.json has a dense calibration in {dense.get('signal', 'native')!r} "
+        f"units; retrieval emits {DenseRetriever.SIGNAL!r}. Run: python -m src.index calibrate"
+    )
+    assert dense.get("n_cards") == 30, "the dense calibration was fitted on a different card count"

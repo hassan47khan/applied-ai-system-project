@@ -109,7 +109,8 @@ def load_calibration(directory: Optional[Path] = None) -> Dict[str, Calibration]
     out = {}
     for name, values in raw.items():
         try:
-            out[name] = Calibration(float(values["floor"]), float(values["full"]))
+            out[name] = Calibration(float(values["floor"]), float(values["full"]),
+                                    str(values.get("signal", "native")))
         except (KeyError, TypeError, ValueError):
             log.warning("Ignoring malformed calibration for %s", name)
     return out

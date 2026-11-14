@@ -175,6 +175,15 @@ MUTATIONS: List[Mutation] = [
              "self.dismissed |= {shown_ids[r - 1] for r in ref.drop_ranks}", "pass"),
     Mutation("session: 'more upbeat' moves the wrong way", "src/session.py",
              "center = _clamp(center + direction * STEP)", "center = _clamp(center - direction * STEP)"),
+    # dense abstention: each of these re-introduces one cause of the live refusal regression
+    Mutation("dense: empty query embedded", "src/retrieval.py",
+             "if not has_content(query):", "if False:"),
+    Mutation("dense: raw cosine used as evidence", "src/retrieval.py",
+             "        return [(c, s - mean) for c, s in raw]", "        return raw"),
+    Mutation("dense: calibration unit not checked", "src/retrieval.py",
+             "if calibration is not None and calibration.signal != self.SIGNAL:", "if False:"),
+    Mutation("calibration: unit dropped when loading", "src/embeddings.py",
+             'str(values.get("signal", "native"))', '"centered"'),
 ]
 
 

@@ -4,13 +4,16 @@
     "floor": 0.1087,
     "full": 0.6394,
     "n_negative": 8,
-    "n_positive": 20
+    "n_positive": 20,
+    "signal": "native"
   },
   "dense": {
-    "balanced_accuracy": 1.0,
-    "floor": 0.621,
-    "full": 0.7189,
+    "balanced_accuracy": 0.938,
+    "floor": 0.0635,
+    "full": 0.1382,
+    "n_cards": 30,
     "n_negative": 8,
-    "n_positive": 20
+    "n_positive": 20,
+    "signal": "centered"
   }
 }

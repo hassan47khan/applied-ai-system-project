@@ -239,8 +239,8 @@ Everything in this section is reproducible from the repo. Commands are in the
 
 | Evaluation | Command | Result |
 |---|---|---|
-| Unit and behaviour tests | `python -m pytest` | **402 / 402 pass**, fully offline |
-| Mutation check | `python tools/mutate.py` | **63 / 63** planted bugs caught by the suite |
+| Unit and behaviour tests | `python -m pytest` | **426 / 426 pass**, fully offline |
+| Mutation check | `python tools/mutate.py` | **67 / 67** planted bugs caught by the suite |
 | Behaviour harness, offline | `python -m src.evaluate` | **33 / 33** checks pass, 7 Gemini-only cases reported as SKIP |
 | Behaviour harness, with Gemini | same, with a key | **30 / 40** checks pass — see §2.3 |
 | Prompt-injection suite, offline | `python -m src.evaluate --injection` | **26 / 26** attacks handled safely |
@@ -380,7 +380,7 @@ stray-number checks; it did not solve invented qualitative claims, and does not 
   the two sets do not overlap.
 - The 7 Gemini-only behaviour cases are reported as SKIP when offline, **never counted as
   passes**.
-- `tools/mutate.py` plants 63 realistic bugs one at a time (invented numbers allowed through,
+- `tools/mutate.py` plants 67 realistic bugs one at a time (invented numbers allowed through,
   Gemini retries switched off, edited cards undetected by the index, flagged input sent to
   Gemini). The suite must fail on every one. This tests the tests.
 
@@ -469,7 +469,7 @@ than no harness, because it stops you looking.
 changed where its cases come from. I had the system probed with requests it had not been tuned
 on, which immediately exposed the negation bug ("not jazz" → jazz at confidence 1.00) and the
 "work out" parsing bug. Those became cases that **originally failed**, so the suite now contains
-evidence rather than agreement. I then added `tools/mutate.py`, which plants 63 bugs to check
+evidence rather than agreement. I then added `tools/mutate.py`, which plants 67 bugs to check
 that the tests actually fail when the code is wrong — testing the tests, which was the real
 answer to the 17/17 problem. The one case that still fails ("sad songs for a road trip") is
 reported as a failure in §4.3 rather than deleted.
@@ -532,5 +532,5 @@ reported as a failure in §4.3 rather than deleted.
 | Conversation | One-shot | Multi-turn refinement |
 | Interface | CLI | Streamlit app with cover art and previews; CLI still works |
 | Safety | Override detection | Plus NFKC normalisation, a 26-attack injection suite, and distress detection |
-| Evaluation | 29 checks, 211 tests, 47 mutants | 40 checks, 402 tests, 63 mutants, 44-query labelled retrieval benchmark with ablation |
+| Evaluation | 29 checks, 211 tests, 47 mutants | 40 checks, 426 tests, 67 mutants, 44-query labelled retrieval benchmark with ablation |
 | LLM text in prompts | Never | **Yes, for understanding and rerank** — see §3.1 |

@@ -44,9 +44,9 @@ The original assignment was a teaching exercise in representing data and scoring
 | **Conversation** | One-shot | **Multi-turn refinement** |
 | **Interface** | CLI | **Streamlit app** with cover art and previews; the CLI still works |
 | **Safety** | Override detection | Plus Unicode normalisation, a 26-attack **prompt-injection suite**, and **distress detection** with crisis-line info |
-| **Evaluation** | 29 checks, 211 tests, 47 mutants | 40 checks, **402 tests**, **63 mutants**, **44-query labelled retrieval benchmark with an ablation table** |
+| **Evaluation** | 29 checks, 211 tests, 47 mutants | 40 checks, **426 tests**, **67 mutants**, **44-query labelled retrieval benchmark with an ablation table** |
 
-**Everything degrades gracefully.** With no API key, or when the free tier runs out of quota, VibeFinder falls back to the fully offline 2.0 path (rule parser, lexical retrieval, template explanations) and says so in the trace and the UI. All 402 tests run with no network.
+**Everything degrades gracefully.** With no API key, or when the free tier runs out of quota, VibeFinder falls back to the fully offline 2.0 path (rule parser, lexical retrieval, template explanations) and says so in the trace and the UI. All 426 tests run with no network.
 
 ---
 
@@ -141,9 +141,9 @@ streamlit run app/streamlit_app.py                          # the app
 python -m src.main "something calm for studying late at night"
 python -m src.main --interactive                            # follow-ups refine the last answer
 python -m src.main --trace "lofi at maximum energy, not acoustic"
-python -m pytest                                            # 402 tests, offline, no key
+python -m pytest                                            # 426 tests, offline, no key
 python -m src.evaluate --injection                           # harness + ablation + injection suite
-python tools/mutate.py                                      # do the tests notice 63 planted bugs?
+python tools/mutate.py                                      # do the tests notice 67 planted bugs?
 python -m src.compare_explainers                             # baseline vs constrained explanations
 python tools/build_catalog.py                                # rebuild data/songs.csv from the source dataset
 ```
@@ -371,8 +371,8 @@ Full detail, including the adversarial probing table and what surprised me, is i
 
 | Evaluation | Command | Offline (no key) | With Gemini |
 |---|---|---|---|
-| Unit and behaviour tests | `python -m pytest` | **402 / 402 pass** | same (suite never uses the network) |
-| Mutation check | `python tools/mutate.py` | **63 / 63** planted bugs caught | — |
+| Unit and behaviour tests | `python -m pytest` | **426 / 426 pass** | same (suite never uses the network) |
+| Mutation check | `python tools/mutate.py` | **67 / 67** planted bugs caught | — |
 | Behaviour harness | `python -m src.evaluate` | **33 / 33** pass, 7 Gemini-only cases SKIP | **30 / 40** pass |
 | Prompt-injection suite | `python -m src.evaluate --injection` | **26 / 26** handled safely | **24 / 26** handled safely |
 | Retrieval lift (situational requests) | included above | 2/9 → **9/9** correct top result | 2/9 → **7/9** |
@@ -468,7 +468,7 @@ regressed.
 - Calibration uses a **disjoint** query set
   ([`calibration_queries.json`](data/eval/calibration_queries.json)); a test enforces no overlap.
 - Gemini-only cases are reported as SKIP offline, **never counted as passes**.
-- `tools/mutate.py` plants **63 realistic bugs** one at a time and requires the suite to fail on
+- `tools/mutate.py` plants **67 realistic bugs** one at a time and requires the suite to fail on
   every one — it tests the tests.
 - Three tests check the documentation itself: the embedded diagram must match its source, every
   relative link must resolve, and the test count quoted in the docs must equal the number the
@@ -490,7 +490,7 @@ regressed.
   the 30 cards are embedded once at build time and every call is cached by content hash. A demo
   costs a handful of calls and the evaluation is reproducible. *This was also load-bearing for
   honesty:* it is why two live runs agree exactly.
-- **The offline path is a real product, not an error page.** All 402 tests run without a
+- **The offline path is a real product, not an error page.** All 426 tests run without a
   network; the UI and CLI always say which path ran and why.
 - **A real catalog, curated deterministically.** Popularity-first, at most 2 songs per artist,
   build script committed. *Trade-off:* it inherits the source's biases (see
@@ -537,7 +537,7 @@ src/            agent, understanding, gemini client, retrieval (+ embeddings, re
 data/           songs.csv (580 tracks) + CATALOG_PROVENANCE.md, knowledge/ (30 cards),
                 index/ (committed embedding index + calibration), eval/ (gold set,
                 calibration set, injection suite)
-tests/          402 tests; fixtures/ keeps the 2.0 catalog and cards the older tests pin
+tests/          426 tests; fixtures/ keeps the 2.0 catalog and cards the older tests pin
 tools/          build_catalog.py, mutate.py
 diagrams/       architecture.mmd (canonical Mermaid source), architecture.md (rendered + prose)
 assets/         architecture.svg (vector export of the diagram)
