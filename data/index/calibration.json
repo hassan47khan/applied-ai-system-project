@@ -5,5 +5,12 @@
     "full": 0.6394,
     "n_negative": 8,
     "n_positive": 20
+  },
+  "dense": {
+    "balanced_accuracy": 1.0,
+    "floor": 0.621,
+    "full": 0.7189,
+    "n_negative": 8,
+    "n_positive": 20
   }
 }
