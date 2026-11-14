@@ -54,12 +54,19 @@ def test_client_errors_are_not_retried(tmp_path):
 
 
 def test_a_retired_model_falls_through_to_the_next(tmp_path):
-    sdk = FakeSDK(json_replies={"x": 4}, missing_models={"gemini-flash-latest"})
+    """A 404 on the preferred model must fall through, and the working one is remembered.
+
+    Deliberately reads the chain from Settings instead of naming models: Google retires
+    model names (every name in the 3.0 chain 404'd on a fresh key in Nov 2026), and this
+    test is about the fallback behaviour, not about which models are current.
+    """
+    first, second = Settings().generation_models[:2]
+    sdk = FakeSDK(json_replies={"x": 4}, missing_models={first})
     client = fake_client(tmp_path, sdk)
     assert client.generate_json("q", SCHEMA, purpose="t") == {"x": 4}
-    assert [c["model"] for c in sdk.generate_calls] == ["gemini-flash-latest", "gemini-flash-lite-latest"]
+    assert [c["model"] for c in sdk.generate_calls] == [first, second]
     client.generate_json("q2", SCHEMA, purpose="t")
-    assert sdk.generate_calls[-1]["model"] == "gemini-flash-lite-latest"   # remembered
+    assert sdk.generate_calls[-1]["model"] == second   # remembered
 
 
 def test_non_json_reply_is_a_failure_not_a_crash(tmp_path):

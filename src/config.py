@@ -26,7 +26,16 @@ ROOT = Path(__file__).resolve().parent.parent
 RETRIEVAL_MODES = ("tfidf", "bm25", "dense", "hybrid")
 
 # First available model wins; later entries are fallbacks if Google renames or retires one.
-GENERATION_MODELS: Tuple[str, ...] = ("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash")
+# Measured 2026-11-14 against a free AI Studio key: the "-latest" aliases 404 on API version
+# v1, and gemini-2.5-flash(-lite) answer "no longer available to new users". The 3.5 pair is
+# what a key issued now can actually call, so it leads the chain; the older names stay as
+# fallbacks for keys that still have access to them.
+GENERATION_MODELS: Tuple[str, ...] = (
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+)
 EMBEDDING_MODELS: Tuple[str, ...] = ("gemini-embedding-2", "gemini-embedding-001")
 EMBEDDING_DIM = 768
 
