@@ -1,0 +1,7 @@
+{
+  "model": "gemini-embedding-2",
+  "dim": 768,
+  "card_count": 30,
+  "content_sha": "5169e2288071711fa348a127a29cd484acccbf170a9341b01d9cd571c4326c58",
+  "built_at": "2026-11-14T17:41:51Z"
+}

@@ -16,6 +16,7 @@ venv/
 
 # Secrets and runtime logs
 .env
+.streamlit/secrets.toml
 logs/vibefinder.log*
 
 # Downloaded datasets and Gemini response cache (rebuildable)
