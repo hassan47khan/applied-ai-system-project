@@ -38,3 +38,27 @@ def pytest_unconfigure(config):
         logger.removeHandler(handler)
     shutil.rmtree(_LOG_DIR, ignore_errors=True)
     shutil.rmtree(_CACHE_DIR, ignore_errors=True)
+
+
+# How many tests the full suite collected, and whether this was a full run. Stashed on the
+# pytest `config` object rather than in a module global: pytest can import conftest under two
+# names ("conftest" and "tests.conftest"), and a test that imports it by name would get a
+# second, empty copy. tests/test_docs_and_diagram.py reads this through the pytestconfig
+# fixture to check the counts quoted in README.md, model_card.md and the architecture diagram
+# against reality. Two commits in this repo's history exist only to correct a test count that
+# had been written by hand; this makes the docs self-checking.
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+TESTS_DIR = Path(__file__).resolve().parent
+
+
+def pytest_collection_modifyitems(session, config, items):
+    selected = bool(config.getoption("keyword") or config.getoption("markexpr"))
+    paths = [a for a in config.args if not a.startswith("-")]
+    whole_suite = not paths or all(
+        Path(p).resolve() in (ROOT_DIR, TESTS_DIR) for p in paths
+    )
+    config.vibefinder_collected = {
+        "count": len(items),
+        "full_run": whole_suite and not selected,
+    }
