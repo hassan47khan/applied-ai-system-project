@@ -44,9 +44,9 @@ The original assignment was a teaching exercise in representing data and scoring
 | **Conversation** | One-shot | **Multi-turn refinement** |
 | **Interface** | CLI | **Streamlit app** with cover art and previews; the CLI still works |
 | **Safety** | Override detection | Plus Unicode normalisation, a 26-attack **prompt-injection suite**, and **distress detection** with crisis-line info |
-| **Evaluation** | 29 checks, 211 tests, 47 mutants | 40 checks, **486 tests**, **74 mutants**, **44-query labelled retrieval benchmark with an ablation table** |
+| **Evaluation** | 29 checks, 211 tests, 47 mutants | 40 checks, **495 tests**, **77 mutants**, **44-query labelled retrieval benchmark with an ablation table** |
 
-**Everything degrades gracefully.** With no API key, or when the free tier runs out of quota, VibeFinder falls back to the fully offline 2.0 path (rule parser, lexical retrieval, template explanations) and says so in the trace and the UI. All 486 tests run with no network.
+**Everything degrades gracefully.** With no API key, or when the free tier runs out of quota, VibeFinder falls back to the fully offline 2.0 path (rule parser, lexical retrieval, template explanations) and says so in the trace and the UI. All 495 tests run with no network.
 
 ---
 
@@ -164,9 +164,11 @@ every evidence threshold: the exact bug class described under
 [the main finding](#the-main-finding-an-improved-retriever-had-silently-disabled-the-refusal-guardrail).
 So `--provider nvidia` with no Gemini key still works, using lexical retrieval, and says so in the trace.
 
-The default chain is `nvidia/nemotron-3-ultra-550b-a55b`, falling back to
-`nvidia/nemotron-3-super-120b-a12b` if Ultra is retired or overloaded. Both ids were checked
-against NVIDIA's live model catalog on 2026-11-14.
+The default chain is `nvidia/nemotron-3-ultra-550b-a55b`, then `nvidia/nemotron-3-super-120b-a12b`,
+then `nvidia/nemotron-3.5-lightning-30b-a3b`. Measured on 2026-11-14 with a build.nvidia.com key,
+Ultra answers, but Super returns `404` even though NVIDIA's model catalog lists it, so Lightning
+(which answers in about 0.4 s) was added as a working last fallback. Super stays in the chain in
+case access returns.
 Override it with `NVIDIA_MODELS` (comma-separated) without a code change.
 
 ### All the commands
@@ -178,9 +180,9 @@ python -m src.main --interactive                            # follow-ups refine 
 python -m src.main --provider nvidia "rainy day blues"      # Nemotron understands and explains
 python -m src.main --provider gemini --model gemini-3.5-flash-lite "late night drive"
 python -m src.main --trace "lofi at maximum energy, not acoustic"
-python -m pytest                                            # 486 tests, offline, no key
+python -m pytest                                            # 495 tests, offline, no key
 python -m src.evaluate --injection                           # harness + ablation + injection suite
-python tools/mutate.py                                      # do the tests notice 74 planted bugs?
+python tools/mutate.py                                      # do the tests notice 77 planted bugs?
 python -m src.compare_explainers                             # baseline vs constrained explanations
 python tools/build_catalog.py                                # rebuild data/songs.csv from the source dataset
 ```
@@ -407,18 +409,29 @@ Full detail, including the adversarial probing table and what surprised me, is i
 [model card](model_card.md#4-reliability-testing-and-evaluation). Saved raw output:
 [`logs/`](logs/).
 
-| Evaluation | Command | Offline (no key) | With Gemini |
-|---|---|---|---|
-| Unit and behaviour tests | `python -m pytest` | **486 / 486 pass** | same (suite never uses the network) |
-| Mutation check | `python tools/mutate.py` | **74 / 74** planted bugs caught | — |
-| Behaviour harness | `python -m src.evaluate` | **33 / 33** pass, 7 Gemini-only cases SKIP | **35 / 40** pass |
-| Prompt-injection suite | `python -m src.evaluate --injection` | **26 / 26** handled safely | **26 / 26** handled safely |
-| Retrieval lift (situational requests) | included above | 2/9 → **9/9** correct top result | 2/9 → **7/9** |
-| Confidence separation | included above | not flagged 0.99 / flagged 0.30 | not flagged 0.98 / flagged 0.35 |
+| Evaluation | Command | Offline (no key) | With Gemini | With NVIDIA Nemotron Ultra |
+|---|---|---|---|---|
+| Unit and behaviour tests | `python -m pytest` | **495 / 495 pass** | same (suite never uses the network) | same |
+| Mutation check | `python tools/mutate.py` | **77 / 77** planted bugs caught | — | — |
+| Behaviour harness | `python -m src.evaluate` | **33 / 33** pass, 7 LLM-only cases SKIP | **35 / 40** pass | **37 / 40** pass |
+| Prompt-injection suite | `python -m src.evaluate --injection` | **26 / 26** handled safely | **26 / 26** | **26 / 26** |
+| Retrieval lift (situational requests) | included above | 2/9 → **9/9** correct top result | 2/9 → **7/9** | 6/9 → **8/9** |
+| Confidence separation | included above | not flagged 0.99 / flagged 0.30 | 0.98 / 0.35 | 0.98 / 0.38 |
+| Failed LLM calls | | — | **74 of ~148** (rate-limited) | **0 of 89** |
 
-Saved output: [`logs/eval_results_offline.txt`](logs/eval_results_offline.txt) and
-[`logs/eval_results.txt`](logs/eval_results.txt). The Gemini column is after the fix described
-below; before it, the same column read 30/40, 24/26 and 0.93 / 0.70.
+Saved output: [`logs/eval_results_offline.txt`](logs/eval_results_offline.txt),
+[`logs/eval_results.txt`](logs/eval_results.txt) (Gemini) and
+[`logs/eval_results_nvidia.txt`](logs/eval_results_nvidia.txt) (Nemotron). The Gemini column is
+after the fix described below; before it, that column read 30/40, 24/26 and 0.93 / 0.70.
+
+**Read the two LLM columns carefully: they are not a fair head-to-head.** The Gemini run was
+rate-limited on the free tier, so for part of it the rule parser stood in for Gemini. The
+Nemotron run had no failed calls at all, which makes it the first clean live run in this project.
+What the table shows is that the Nemotron path works, and works well, through the same
+guardrails. It does not show that Nemotron beats a healthy Gemini.
+
+The Nemotron numbers are *after* two bugs the live run found had been fixed (see
+[Nemotron, measured live](#nemotron-measured-live)); its first run scored 35/40.
 
 ### Retrieval ablation (44 labelled queries)
 
@@ -436,8 +449,23 @@ broken down by request type.
 
 **What it shows.** Lexical retrieval is perfect on direct requests and useless where the
 vocabulary differs: 0.44 Hit@1 on synonyms, **0.00 on non-English**. Dense retrieval closes that
-gap completely, which is the entire justification for the Gemini path. The optional rerank
-changed nothing measurable, so it stays off by default.
+gap completely, which is the entire justification for the Gemini path.
+
+**A correction about rerank.** An earlier version of this README said the optional rerank
+"changed nothing measurable". That was wrong, because **the Gemini rerank never actually ran**:
+every rerank call was rate-limited, fell back silently to the original order, and the harness
+didn't count that as a fallback. It does now, and the Gemini table above carries the note
+*"38/44 degraded"*. With Nemotron, where the rerank does run, it lifts off-topic abstention from
+**0.75 to 1.00**, closing the `hybrid` gap described next:
+
+```
+  retriever        R@3  Hit@1   MRR  nDCG@3  abstain  direct synonym  multi non-en
+  hybrid          0.96   1.00  1.00    0.97     0.75    1.00    1.00   1.00   1.00
+  hybrid+rerank   0.97   1.00  1.00    0.98     1.00    1.00    1.00   1.00   1.00   (Nemotron)
+```
+
+Rerank is still off by default. One clean run is the first evidence that it earns its cost, not
+a settled result.
 
 **What changed with the fix.** Before it, `hybrid` scored 0.94 Hit@1 and 0.88 on synonyms;
 it now scores 1.00 on both. Dense was injecting low-quality cards into the fusion for vague
@@ -552,6 +580,38 @@ sha256, and two full runs before the fix
 retriever, so the offline suite stayed green at 402/402 throughout. It now has 24 tests for this
 bug, and four new mutants, each re-introducing one cause, that the suite must catch.
 
+### Nemotron, measured live
+
+Adding NVIDIA Nemotron and then running it against the real API, rather than only the offline
+fake, found five things. None of them were visible offline.
+
+1. **The documented JSON method doesn't exist on the hosted API.** NVIDIA's NIM docs give
+   `nvext.guided_json` for schema-constrained output, and the client was written that way. The
+   hosted API rejects it with `400 unknown field guided_json`. Measured with a prompt that did
+   *not* ask for JSON, so that only the API could impose the format:
+   `response_format: json_schema` returned exactly the schema, while `json_object` returned
+   valid JSON that ignored it. The client now uses `json_schema`.
+2. **A listed model can't necessarily be called.** Nemotron 3 Super, the configured fallback,
+   returned `404` although NVIDIA's model catalog lists it: the same trap `gemini-2.5-flash` set
+   earlier. Lightning was added as a working last fallback.
+3. **The model doesn't always follow the paraphrase instruction.** Asked about `not happy`,
+   Nemotron returned the right intent (avoid *happy*, nothing wanted) but the paraphrase
+   `"not happy"`, which the prompt says should leave rejections out. Retrieving on it found a
+   card whose genres then counted as a preference, so *exclusion-only* was never flagged. That is
+   the same leak fixed for the rule path in the refusal fix. The paraphrase is now treated as
+   untrusted and stripped of rejections like everything else, which fixed this case and
+   `no jazz and calm` (35/40 → 37/40). That fix applies to Gemini too.
+4. **The disagreement log blamed the wrong model.** Where the LLM and the rule parser disagree,
+   the trace and `logs/parser_disagreements.jsonl` (human checkpoint H2) said `gemini=` even
+   when Nemotron produced the reading. Each record now names its provider.
+5. **A harness row that had never run.** Nemotron's rerank changed the ablation, Gemini's never
+   had, and the reason was that every Gemini rerank call had been rate-limited and had fallen back
+   silently, uncounted. The harness now reports rerank fallbacks (see the correction above).
+
+The first and fifth are about the measurements as much as the model: the docs were followed and
+were wrong, and a table printed a result for something that never happened. Both are now
+checked by tests, and by mutants that re-introduce each one.
+
 ### How the benchmark avoids grading its own homework
 
 - The 44 gold queries in [`data/eval/retrieval_gold.json`](data/eval/retrieval_gold.json) were
@@ -560,7 +620,7 @@ bug, and four new mutants, each re-introducing one cause, that the suite must ca
 - Calibration uses a **disjoint** query set
   ([`calibration_queries.json`](data/eval/calibration_queries.json)); a test enforces no overlap.
 - Gemini-only cases are reported as SKIP offline, **never counted as passes**.
-- `tools/mutate.py` plants **74 realistic bugs** one at a time and requires the suite to fail on
+- `tools/mutate.py` plants **77 realistic bugs** one at a time and requires the suite to fail on
   every one — it tests the tests.
 - Three tests check the documentation itself: the embedded diagram must match its source, every
   relative link must resolve, and the test count quoted in the docs must equal the number the
@@ -582,7 +642,7 @@ bug, and four new mutants, each re-introducing one cause, that the suite must ca
   the 30 cards are embedded once at build time and every call is cached by content hash. A demo
   costs a handful of calls and the evaluation is reproducible. *This was also load-bearing for
   honesty:* it is why two live runs agree exactly.
-- **The offline path is a real product, not an error page.** All 486 tests run without a
+- **The offline path is a real product, not an error page.** All 495 tests run without a
   network; the UI and CLI always say which path ran and why.
 - **A real catalog, curated deterministically.** Popularity-first, at most 2 songs per artist,
   build script committed. *Trade-off:* it inherits the source's biases (see
@@ -610,10 +670,12 @@ bug, and four new mutants, each re-introducing one cause, that the suite must ca
   hijacked-model suite runs against both. Embeddings are deliberately *not* switchable, for the
   reason given in setup step 6. *Trade-off:* the NVIDIA path still needs a Gemini key for dense
   retrieval; without one, it uses lexical retrieval.
-- **Nemotron runs with reasoning off and guided JSON on.** Understanding and explanations are
-  short schema-constrained tasks, so the hidden reasoning trace would add latency without
-  improving the answer. If an endpoint refuses `guided_json`, the client retries once without it.
-  The schema is in the prompt either way, and the reply is validated locally either way.
+- **Nemotron runs with reasoning off and `response_format: json_schema` on.** Understanding and
+  explanations are short schema-constrained tasks, so a hidden reasoning trace would add latency
+  without improving the answer. The JSON method was chosen by measurement, not from the docs: see
+  [Nemotron, measured live](#nemotron-measured-live). If an endpoint refuses `response_format`,
+  the client retries once without it. The schema is in the prompt either way, and the reply is
+  validated locally either way.
 
 ---
 
@@ -639,10 +701,13 @@ Details and the full bias discussion are in the [model card](model_card.md#2-sys
 - **The explanation validator catches shape, not truth.** It rejects stray numbers and
   miscited cards but cannot detect an invented qualitative claim.
 - **Confidence measures fit to your request**, not whether you will like the songs.
-- **The NVIDIA path is tested offline, not yet measured live.** 58 tests and 7 mutants cover it
-  against a fake endpoint that raises the real SDK's exceptions, but no live evaluation has run on
-  Nemotron yet, so the harness numbers above are Gemini's. Run
-  `VIBEFINDER_LLM=nvidia python -m src.evaluate --injection` with a key to produce them.
+- **Nemotron's three remaining failures.** `beach party` picks K-pop where the test wants Latin,
+  as Gemini does too. `not loud` is read as a request for quiet music rather than an exclusion,
+  as under every provider. And the impossible combo (*"ambient … maximum energy, undanceable and
+  acoustic"*) is read as ranges with enough slack that the agent says *"I relaxed a preference"*
+  instead of *"impossible"*. All three are still flagged or explained to the user.
+- **The fallback model depends on your key's access.** Nemotron 3 Super is listed in NVIDIA's
+  catalog but returned `404` for a free build.nvidia.com key, so the working fallback is Lightning.
 
 ---
 
@@ -656,7 +721,7 @@ src/            agent, understanding, LLM clients (llm_base, gemini, nvidia, pro
 data/           songs.csv (580 tracks) + CATALOG_PROVENANCE.md, knowledge/ (30 cards),
                 index/ (committed embedding index + calibration), eval/ (gold set,
                 calibration set, injection suite)
-tests/          486 tests; fixtures/ keeps the 2.0 catalog and cards the older tests pin
+tests/          495 tests; fixtures/ keeps the 2.0 catalog and cards the older tests pin
 tools/          build_catalog.py, mutate.py
 diagrams/       architecture.mmd (canonical Mermaid source), architecture.md (rendered + prose)
 assets/         architecture.svg (vector export of the diagram)

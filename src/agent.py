@@ -229,10 +229,15 @@ class VibeFinderAgent:
         """2. Understand the request, retrieve context cards, build the profile."""
         intent = self._understand(text, result)
         if intent is not None and not intent.on_topic:
-            _step(result, "plan", "gemini judged the request off-topic; not retrieving")
+            _step(result, "plan", f"{result.parser} judged the request off-topic; not retrieving")
             return [], Profile()
         if intent is not None and intent.english_paraphrase:
-            retrieval_text = intent.english_paraphrase   # rejected things already left out
+            # The prompt asks the model to leave rejected things out of the paraphrase, but a
+            # paraphrase is model output and is not trusted to comply. Nemotron, asked about
+            # "not happy", returned the paraphrase "not happy"; embedded, that retrieved a card
+            # whose genres then counted as a preference, so exclusion-only was never flagged.
+            # Strip rejections here exactly as the rule path does.
+            retrieval_text = strip_negated(intent.english_paraphrase, self.genre_vocab, self.mood_vocab)
         else:
             retrieval_text = strip_negated(text, self.genre_vocab, self.mood_vocab)
         retrieved = (
@@ -253,11 +258,12 @@ class VibeFinderAgent:
         else:
             from .understanding import disagreements, profile_from_intent
             explicit = profile_from_intent(intent, self.genre_vocab)
-            diffs = disagreements(parse_explicit(text, self.genre_vocab, self.mood_vocab), explicit)
+            diffs = disagreements(parse_explicit(text, self.genre_vocab, self.mood_vocab), explicit,
+                                  label=result.parser)
             if diffs:
                 result.disagreements = diffs
                 _step(result, "cross-check", "rule parser read it differently: " + "; ".join(diffs))
-                _log_disagreement(text, diffs)
+                _log_disagreement(text, diffs, result.parser)
             profile = apply_context(explicit, retrieved)
         _step(result, "plan", profile.describe())
         return retrieved, profile
@@ -417,15 +423,16 @@ class VibeFinderAgent:
         return cards[0] if cards else None
 
 
-def _log_disagreement(text: str, diffs: List[str]) -> None:
-    """Append to logs/parser_disagreements.jsonl: a running record of where Gemini and the
-    rules differ, for spotting regressions in either."""
+def _log_disagreement(text: str, diffs: List[str], provider: str = "gemini") -> None:
+    """Append to logs/parser_disagreements.jsonl: a running record of where the LLM and the
+    rules differ, for spotting regressions in either. Records which provider disagreed."""
     import json
     from .log_setup import LOG_DIR
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         with open(LOG_DIR / "parser_disagreements.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"query": text, "diffs": diffs}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"query": text, "provider": provider, "diffs": diffs},
+                               ensure_ascii=False) + "\n")
     except OSError:
         pass
 

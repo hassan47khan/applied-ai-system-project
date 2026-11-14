@@ -17,10 +17,15 @@ Nemotron specifics, from NVIDIA's model pages:
   * Nemotron 3 is a reasoning model. Thinking is switched off per request with
     `chat_template_kwargs: {"enable_thinking": False}`: these are short JSON tasks, and
     reasoning would add latency and tokens without improving a schema-constrained answer.
-  * Schema-constrained output is requested with `nvext: {"guided_json": schema}`. If an
-    endpoint rejects that extension, the request is retried once without it. The schema is
-    also stated in the prompt, and the reply is parsed and validated locally either way, so
-    guided decoding is a convenience here, never the defence.
+  * Schema-constrained output is requested with the OpenAI-standard
+    `response_format: {"type": "json_schema", ...}`. Measured against the hosted API on
+    2026-11-14, with a prompt that did not ask for JSON, so only the API could impose it:
+      - `response_format` json_schema   -> `{"genre": "lofi"}`, exactly the schema
+      - `nvext.guided_json` (NIM docs)   -> 400 "unknown field `guided_json`"
+      - `response_format` json_object   -> valid JSON that ignored the schema
+    If an endpoint refuses `response_format`, the request is retried once without it. The
+    schema is also stated in the prompt, and the reply is parsed and validated locally either
+    way, so constrained decoding is a convenience here, never the defence.
 """
 
 import json
@@ -34,7 +39,7 @@ log = logging.getLogger("vibefinder.nvidia")
 
 # A 400/422 that names one of these is the endpoint refusing the request's extensions, not
 # the request itself.
-_EXTENSION_ERRORS = ("nvext", "guided_json", "guided", "extra")
+_EXTENSION_ERRORS = ("response_format", "json_schema", "nvext", "guided", "extra")
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
@@ -73,7 +78,7 @@ class NvidiaClient(LLMClientBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._guided = True     # send nvext.guided_json until an endpoint refuses it
+        self._guided = True     # send response_format json_schema until an endpoint refuses it
 
     # ------------------------------------------------------------------ setup
     @property
@@ -150,11 +155,13 @@ class NvidiaClient(LLMClientBase):
 
         def send(guided: bool):
             extra: Dict[str, Any] = {"chat_template_kwargs": {"enable_thinking": False}}
+            kwargs: Dict[str, Any] = {}
             if guided:
-                extra["nvext"] = {"guided_json": schema}
+                kwargs["response_format"] = {"type": "json_schema", "json_schema": {
+                    "name": f"vibefinder_{re.sub(r'[^A-Za-z0-9_-]', '_', purpose)}", "schema": schema}}
             return self._call_with_retry(purpose, lambda: sdk.chat.completions.create(
                 model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
-                extra_body=extra))
+                extra_body=extra, **kwargs))
 
         try:
             return send(self._guided)
@@ -163,7 +170,7 @@ class NvidiaClient(LLMClientBase):
                        and any(word in str(exc).lower() for word in _EXTENSION_ERRORS))
             if not refused:
                 raise
-            log.warning("NVIDIA endpoint refused guided_json (%s); retrying without it. "
+            log.warning("NVIDIA endpoint refused response_format (%s); retrying without it. "
                         "The schema is still in the prompt and the reply is still validated.",
                         _error_code(exc))
             self._guided = False

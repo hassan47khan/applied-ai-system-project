@@ -51,9 +51,13 @@ NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 # chosen model for this project; Super stays as the fallback if Ultra is retired or overloaded.
 # Model ids get retired (every Gemini id in the first chain did), so this is a chain, and
 # NVIDIA_MODELS overrides it without a code change.
+# Measured 2026-11-14 with a build.nvidia.com key: Ultra answers, but Super returns 404 even
+# though /v1/models lists it (listed is not callable, as with gemini-2.5-flash). Lightning
+# answers in ~0.4 s, so it is appended as the last fallback; Super stays in case access returns.
 NVIDIA_MODELS: Tuple[str, ...] = (
     "nvidia/nemotron-3-ultra-550b-a55b",
     "nvidia/nemotron-3-super-120b-a12b",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
 )
 EMBEDDING_DIM = 768
 

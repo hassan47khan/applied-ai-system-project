@@ -189,6 +189,17 @@ def _top1_ok(case: Case, result: AgentResult) -> bool:
     return False
 
 
+def degraded(last_info) -> bool:
+    """Did the last retrieval not measure what its ablation row's label says?
+
+    True if retrieval fell back to lexical *or* a rerank fell back to the base order. Rerank
+    fallbacks were once uncounted: with every Gemini rerank call rate-limited, the
+    "hybrid+rerank" row was really plain hybrid, printed as a real result, and the docs
+    concluded that rerank "changes nothing".
+    """
+    return bool({"fallback", "rerank_fallback"} & {k for k, v in (last_info or {}).items() if v})
+
+
 def run_ablation(print_misses: bool = False) -> None:
     """Every retriever on the labelled gold set. Arms that need Gemini say so if skipped."""
     from .config import get_settings
@@ -218,13 +229,14 @@ def run_ablation(print_misses: bool = False) -> None:
             print(f"  {label:<14} skipped ({shared_llm().label} {shared_llm().unavailable_reason()})")
             continue
         retriever, notes = make_retriever(cards, mode=mode, settings=settings.__class__(rerank=rerank))
-        info = lambda: bool((getattr(retriever, "last_info", {}) or {}).get("fallback"))  # noqa: E731
+        info = lambda: degraded(getattr(retriever, "last_info", None))  # noqa: E731
         rep = evaluate_retriever(label, lambda q: [c.id for c, _ in retriever.retrieve(
                                      q, k=3, min_score=RETRIEVAL_MIN_SCORE)],
                                  queries, fallback_of=info)
         reports.append(rep)
         kinds = rep.by_kind
-        note = f"  ({rep.fallbacks} fell back to lexical)" if rep.fallbacks else ""
+        note = (f"  ({rep.fallbacks}/{len(queries)} degraded: "
+                f"{'rerank or lexical' if rerank else 'lexical'} fallback)" if rep.fallbacks else "")
         print(f"  {label:<14} {rep.recall3:5.2f} {rep.hit1:6.2f} {rep.mrr:5.2f} {rep.ndcg3:7.2f} "
               f"{rep.abstain:8.2f}  {kinds.get('direct', 0):6.2f} {kinds.get('synonym', 0):7.2f} "
               f"{kinds.get('multi_intent', 0):6.2f} {kinds.get('non_english', 0):6.2f}{note}")

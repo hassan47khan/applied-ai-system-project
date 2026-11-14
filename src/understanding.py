@@ -215,13 +215,15 @@ class GeminiUnderstander:
         return intent
 
 
-def disagreements(rule: Profile, gemini: Profile) -> List[str]:
-    """Where the two parsers read the request differently (for the trace and the log)."""
+def disagreements(rule: Profile, model: Profile, label: str = "gemini") -> List[str]:
+    """Where the rule parser and the LLM read the request differently (for the trace and the
+    log). `label` names the provider that produced `model`, so a reviewer reading the log can
+    tell a Nemotron disagreement from a Gemini one."""
     out = []
     for name in ("genres", "avoid_genres", "moods", "avoid_moods"):
-        a, b = set(getattr(rule, name)), set(getattr(gemini, name))
+        a, b = set(getattr(rule, name)), set(getattr(model, name))
         if a != b:
-            out.append(f"{name}: rules={sorted(a) or '-'} gemini={sorted(b) or '-'}")
+            out.append(f"{name}: rules={sorted(a) or '-'} {label}={sorted(b) or '-'}")
     return out
 
 

@@ -51,8 +51,9 @@ class FakeOpenAI:
         self.calls.append(kwargs)
         if kwargs["model"] in self.missing_models:
             raise status_error(openai.NotFoundError, 404, f"model {kwargs['model']} not found")
-        if self.reject_guided and "nvext" in kwargs.get("extra_body", {}):
-            raise status_error(openai.BadRequestError, 400, "Unsupported parameter: nvext.guided_json")
+        if self.reject_guided and "response_format" in kwargs:
+            raise status_error(openai.BadRequestError, 400,
+                               "unknown field `response_format`, expected one of `messages`, `model`")
         if self.errors:
             raise self.errors.pop(0)
         content = self.replies[0] if len(self.replies) == 1 else self.replies.pop(0)
@@ -80,7 +81,9 @@ def test_returns_parsed_json_and_sends_the_nemotron_options(tmp_path):
     assert call["model"] == NVIDIA_MODELS[0]
     assert call["temperature"] == 0.3
     assert call["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
-    assert call["extra_body"]["nvext"] == {"guided_json": SCHEMA}
+    assert call["response_format"] == {"type": "json_schema",
+                                       "json_schema": {"name": "vibefinder_t", "schema": SCHEMA}}
+    assert "nvext" not in call["extra_body"], "the hosted API rejects nvext.guided_json with a 400"
     assert call["messages"][0] == {"role": "system", "content": "be terse"}
     assert call["messages"][1]["content"] == "q" + schema_instruction(SCHEMA)
     assert client.stats.prompt_tokens == 11 and client.stats.output_tokens == 7
@@ -143,14 +146,20 @@ def test_a_retired_model_falls_through_to_the_next_and_is_remembered(tmp_path):
     assert sdk.calls[-1]["model"] == second
 
 
-def test_an_endpoint_that_refuses_guided_json_is_retried_once_without_it(tmp_path):
+def test_an_endpoint_that_refuses_response_format_is_retried_once_without_it(tmp_path):
     sdk = FakeOpenAI({"x": 5}, reject_guided=True)
     client = nvidia(tmp_path, sdk)
     assert client.generate_json("q", SCHEMA, purpose="t") == {"x": 5}
-    assert "nvext" in sdk.calls[0]["extra_body"] and "nvext" not in sdk.calls[1]["extra_body"]
+    assert "response_format" in sdk.calls[0] and "response_format" not in sdk.calls[1]
     assert sdk.calls[1]["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
     client.generate_json("q2", SCHEMA, purpose="t")
-    assert "nvext" not in sdk.calls[-1]["extra_body"], "the refusal is remembered"
+    assert "response_format" not in sdk.calls[-1], "the refusal is remembered"
+
+
+def test_the_schema_name_is_safe_for_any_purpose(tmp_path):
+    sdk = FakeOpenAI({"x": 1})
+    nvidia(tmp_path, sdk).generate_json("q", SCHEMA, purpose="query understand/v2")
+    assert sdk.calls[0]["response_format"]["json_schema"]["name"] == "vibefinder_query_understand_v2"
 
 
 def test_a_truncated_reply_is_a_failure_not_a_partial_answer(tmp_path):
@@ -229,7 +238,8 @@ def test_a_model_override_leads_its_own_providers_chain_only(monkeypatch):
     monkeypatch.setenv("VIBEFINDER_LLM", "nvidia")
     monkeypatch.setenv("VIBEFINDER_LLM_MODEL", NVIDIA_MODELS[1])
     s = get_settings()
-    assert s.nvidia_models == (NVIDIA_MODELS[1], NVIDIA_MODELS[0]), "moved to the front, no duplicate"
+    expected = (NVIDIA_MODELS[1],) + tuple(m for m in NVIDIA_MODELS if m != NVIDIA_MODELS[1])
+    assert s.nvidia_models == expected, "moved to the front, no duplicate, rest in order"
     assert s.generation_models == Settings(llm_provider="gemini").generation_models, "Gemini untouched"
 
 
@@ -280,6 +290,51 @@ def test_a_hijacked_nemotron_still_cannot_break_the_invariants(tmp_path, attack)
     agent = VibeFinderAgent(understander=GeminiUnderstander(nvidia(tmp_path, FakeOpenAI(HOSTILE)),
                                                             GENRES, MOODS))
     _assert_invariants(agent.run(attack["q"]))
+
+
+def test_parser_disagreements_name_nemotron_not_gemini(tmp_path):
+    """The disagreement log is human checkpoint H2: it must say which model disagreed."""
+    sdk = FakeOpenAI(reply(genres=["classical"], moods=["focused"]))
+    agent = VibeFinderAgent(understander=GeminiUnderstander(nvidia(tmp_path, sdk), GENRES, MOODS))
+    result = agent.run("something for studying")
+    assert result.disagreements, "the rule parser reads no genre here, so the two must differ"
+    assert all(" nvidia=" in d and "gemini" not in d for d in result.disagreements)
+
+
+def test_a_paraphrase_that_keeps_the_rejection_does_not_retrieve_on_it(tmp_path):
+    """Live regression: Nemotron answered "not happy" with the paraphrase "not happy". The
+    intent was right (avoid happy, nothing wanted), but retrieving on the paraphrase found a
+    card whose genres then counted as a preference, so exclusion-only was never raised."""
+    from src.retrieval import BM25Retriever, DenseRetriever, HybridRetriever, load_cards
+    from tests.fakes import concept_vector
+    cards = load_cards()
+    embedded = []
+
+    def embed(text):
+        embedded.append(text)
+        return concept_vector(text)
+
+    dense = DenseRetriever(cards, {c.id: concept_vector(" ".join(c.keywords)) for c in cards}, embed)
+    sdk = FakeOpenAI(reply(avoid_moods=["happy"], english_paraphrase="not happy"))
+    agent = VibeFinderAgent(cards=cards, retriever=HybridRetriever(BM25Retriever(cards), dense),
+                            understander=GeminiUnderstander(nvidia(tmp_path, sdk), GENRES, MOODS))
+    result = agent.run("not happy")
+    assert result.parser == "nvidia"
+    assert "not happy" not in embedded, "the rejection must be stripped before retrieval"
+    assert result.retrieved == [] and "exclusion_only" in result.issues and result.needs_review
+
+
+@pytest.mark.parametrize("last_info, expected", [
+    ({"mode": "hybrid"}, False),
+    ({"mode": "hybrid+rerank"}, False),
+    ({"mode": "lexical", "fallback": "no embedding index"}, True),
+    ({"mode": "hybrid+rerank", "rerank_fallback": "ClientError 429"}, True),
+    ({"mode": "hybrid+rerank", "rerank_fallback": ""}, False),
+    (None, False),
+])
+def test_the_ablation_reports_a_rerank_that_never_ran(last_info, expected):
+    from src.evaluate import degraded
+    assert degraded(last_info) is expected
 
 
 def test_flagged_input_is_never_sent_to_nemotron(tmp_path):

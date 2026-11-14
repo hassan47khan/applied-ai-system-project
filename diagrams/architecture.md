@@ -77,8 +77,8 @@ flowchart TD
     H4 -. "follow-up" .-> U
 
     subgraph TESTING["T3/T4 offline reliability gates (CI-style, no network)"]
-        T3[["T3 pytest: 486 tests<br/>against fake Gemini and NVIDIA SDKs,<br/>incl. a fully hijacked model"]]
-        T4[["T4 src/evaluate.py: behaviour cases,<br/>retrieval ablation on 44 labelled queries,<br/>26-attack injection suite;<br/>tools/mutate.py: 74 planted bugs"]]
+        T3[["T3 pytest: 495 tests<br/>against fake Gemini and NVIDIA SDKs,<br/>incl. a fully hijacked model"]]
+        T4[["T4 src/evaluate.py: behaviour cases,<br/>retrieval ablation on 44 labelled queries,<br/>26-attack injection suite;<br/>tools/mutate.py: 77 planted bugs"]]
     end
     T3 -.->|gates| AGENT
     T4 -.->|gates| RAG
