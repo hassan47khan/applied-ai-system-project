@@ -124,7 +124,7 @@ def save_calibration(calibrations: Dict[str, Dict], directory: Optional[Path] = 
 
 
 def make_retriever(cards: List[Card], mode: Optional[str] = None, settings: Optional[Settings] = None,
-                   client: Optional[GeminiClient] = None) -> Tuple[object, List[str]]:
+                   client: Optional[GeminiClient] = None, llm=None) -> Tuple[object, List[str]]:
     """Build the retriever for `mode` and return (retriever, notes about any downgrade).
 
     tfidf  the original VibeFinder 2.0 retriever (offline)
@@ -161,9 +161,17 @@ def make_retriever(cards: List[Card], mode: Optional[str] = None, settings: Opti
         retriever = _DenseWithFallback(dense, bm25) if dense is not None else bm25
     else:
         retriever = HybridRetriever(bm25, dense)
-    if settings.rerank and client.available:
-        from .rerank import RerankingRetriever
-        retriever = RerankingRetriever(retriever, client)
+    if settings.rerank:
+        # Rerank is generation, so it follows VIBEFINDER_LLM; the dense arm above stays on the
+        # Gemini client, because the committed index was built with its embedding model.
+        if llm is None and settings.llm_provider == "gemini":
+            llm = client
+        elif llm is None:
+            from .providers import shared_llm
+            llm = shared_llm(settings.llm_provider)
+        if llm.available:
+            from .rerank import RerankingRetriever
+            retriever = RerankingRetriever(retriever, llm)
     return retriever, notes
 
 

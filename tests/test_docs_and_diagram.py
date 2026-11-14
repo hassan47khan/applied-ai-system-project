@@ -73,11 +73,23 @@ def test_relative_links_in_docs_resolve(doc: str) -> None:
     assert not broken, f"{doc} has broken relative links: {broken}"
 
 
+KEY_PATTERNS = {
+    "Gemini": r"AIza[0-9A-Za-z_\-]{30,}",        # AI Studio keys
+    "NVIDIA": r"nvapi-[0-9A-Za-z_\-]{20,}",      # build.nvidia.com keys
+}
+
+
 def test_no_api_key_shaped_strings_in_tracked_docs() -> None:
-    """A real AI Studio key starts with AIza; it must never appear in a tracked file."""
+    """Real provider keys must never appear in a tracked file."""
     for doc in DOCS + ("requirements.txt", ".env.example", ".gitignore"):
         text = (ROOT / doc).read_text(encoding="utf-8")
-        assert not re.search(r"AIza[0-9A-Za-z_\-]{30,}", text), f"{doc} looks like it holds a key"
+        for provider, pattern in KEY_PATTERNS.items():
+            assert not re.search(pattern, text), f"{doc} looks like it holds a {provider} key"
+
+
+@pytest.mark.parametrize("provider, sample", [("Gemini", "AIza" + "x" * 35), ("NVIDIA", "nvapi-" + "y" * 40)])
+def test_the_key_patterns_would_catch_a_real_key(provider, sample) -> None:
+    assert re.search(KEY_PATTERNS[provider], sample)
 
 
 def test_env_is_ignored_and_example_is_not() -> None:

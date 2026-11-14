@@ -51,7 +51,7 @@ def format_result(result: AgentResult, show_trace: bool = False) -> str:
         lines += _wrap("  Search profile    : ", result.profile, 22)
         lines.append(f"  Confidence        : {result.confidence:.2f}   "
                      f"Needs human review: {'YES' if result.needs_review else 'no'}")
-        if result.parser == "gemini" or (result.retrieval_mode and result.retrieval_mode != "tfidf"):
+        if result.parser != "rules" or (result.retrieval_mode and result.retrieval_mode != "tfidf"):
             lines.append(f"  Understood by     : {result.parser}   retrieval: {result.retrieval_mode or 'none'}")
     for rec in result.recommendations:
         song = rec.song
@@ -83,7 +83,12 @@ def main(argv=None) -> int:
     parser.add_argument("--trace", action="store_true", help="print the agent's step-by-step trace")
     parser.add_argument("--llm", action="store_true",
                         help="kept for 2.0 compatibility; Gemini is now used whenever a key is set")
-    parser.add_argument("--offline", action="store_true", help="never call Gemini")
+    parser.add_argument("--offline", action="store_true", help="never call any LLM")
+    parser.add_argument("--provider", choices=["gemini", "nvidia"],
+                        help="which LLM understands requests, reranks and explains "
+                             "(default: VIBEFINDER_LLM or gemini)")
+    parser.add_argument("--model", help="try this model first for the chosen provider, e.g. "
+                                        "nvidia/nemotron-3-ultra-550b-a55b")
     parser.add_argument("--retrieval", choices=["tfidf", "bm25", "dense", "hybrid"],
                         help="retrieval mode (default: VIBEFINDER_RETRIEVAL or hybrid)")
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
@@ -99,6 +104,10 @@ def main(argv=None) -> int:
     try:
         if args.offline:
             os.environ["VIBEFINDER_USE_GEMINI"] = "0"    # read when the shared client is created
+        if args.provider:
+            os.environ["VIBEFINDER_LLM"] = args.provider
+        if args.model:
+            os.environ["VIBEFINDER_LLM_MODEL"] = args.model
         agent = VibeFinderAgent(explainer=make_explainer(not args.offline), k=max(1, min(args.k, 10)),
                                 retrieval_mode=args.retrieval)
     except (OSError, ValueError) as exc:

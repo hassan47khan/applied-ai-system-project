@@ -1,6 +1,6 @@
 # VibeFinder 3.0
 
-**A Gemini-powered, retrieval-grounded, self-checking music recommender that tells you how sure it is — and flags its own answer when it had to bend your request.**
+**An LLM-powered (Gemini or NVIDIA Nemotron, switchable), retrieval-grounded, self-checking music recommender that tells you how sure it is — and flags its own answer when it had to bend your request.**
 
 > **CodePath AI110, Project 4: Applied AI System**
 > Author: Hassan Khan · [Model card](model_card.md) · [Architecture](diagrams/architecture.md) · [AI interaction log](ai_interactions.md)
@@ -38,15 +38,15 @@ The original assignment was a teaching exercise in representing data and scoring
 |---|---|---|
 | **Catalog** | 18 invented songs | **580 real tracks** from a BSD-licensed Spotify snapshot ([provenance](data/CATALOG_PROVENANCE.md)) |
 | **Knowledge base** | 13 context cards | **30 cards**, ranges calibrated to the real catalog |
-| **Query understanding** | Regex rules only | **Gemini, schema-constrained to the catalog's vocabulary**; rules as fallback *and* as a cross-check |
+| **Query understanding** | Regex rules only | **Gemini or NVIDIA Nemotron (switchable), schema-constrained to the catalog's vocabulary**; rules as fallback *and* as a cross-check |
 | **Retrieval** | TF-IDF | **Hybrid: BM25 + Gemini embeddings, RRF fusion, MMR diversity**, one calibrated evidence scale, optional rerank |
 | **Explanations** | Template, or one Gemini call per song | **One batched call, each explanation validated** (names its track, length, cited card, no invented numbers) |
 | **Conversation** | One-shot | **Multi-turn refinement** |
 | **Interface** | CLI | **Streamlit app** with cover art and previews; the CLI still works |
 | **Safety** | Override detection | Plus Unicode normalisation, a 26-attack **prompt-injection suite**, and **distress detection** with crisis-line info |
-| **Evaluation** | 29 checks, 211 tests, 47 mutants | 40 checks, **426 tests**, **67 mutants**, **44-query labelled retrieval benchmark with an ablation table** |
+| **Evaluation** | 29 checks, 211 tests, 47 mutants | 40 checks, **486 tests**, **74 mutants**, **44-query labelled retrieval benchmark with an ablation table** |
 
-**Everything degrades gracefully.** With no API key, or when the free tier runs out of quota, VibeFinder falls back to the fully offline 2.0 path (rule parser, lexical retrieval, template explanations) and says so in the trace and the UI. All 426 tests run with no network.
+**Everything degrades gracefully.** With no API key, or when the free tier runs out of quota, VibeFinder falls back to the fully offline 2.0 path (rule parser, lexical retrieval, template explanations) and says so in the trace and the UI. All 486 tests run with no network.
 
 ---
 
@@ -67,7 +67,8 @@ The flow in one paragraph: a request passes the **guardrails** (Unicode normalis
 | Component | File | Role |
 |---|---|---|
 | Settings | `src/config.py` | Env and `.env` settings: paths, retrieval mode, model fallback chains |
-| Gemini client | `src/gemini.py` | One door to Gemini: retry with backoff on 429/5xx, model fallback on 404, sha256 disk cache, token and latency accounting, `GeminiUnavailable` for clean fallback |
+| LLM clients | `src/llm_base.py`, `src/gemini.py`, `src/nvidia.py` | One shared base for retry with backoff on 429/5xx, model fallback on 404, sha256 disk cache, token and latency accounting, and a clean `LLMUnavailable` fallback. `GeminiClient` also does embeddings; `NvidiaClient` calls Nemotron through NVIDIA's OpenAI-compatible API |
+| Provider switch | `src/providers.py` | Picks the generation model (`VIBEFINDER_LLM`, `--provider`, or the UI selector). Embeddings always stay on Gemini |
 | Guardrails | `src/guardrails.py` | Rejects unusable input, NFKC and zero-width stripping, override detection (flagged text never reaches Gemini), distress detection |
 | Understanding | `src/understanding.py` | Gemini reads the request into an `Intent` whose genre and mood fields are catalog enums; the validator drops unknown values, clamps ranges and strips instruction-like paraphrases |
 | Retrieval | `src/retrieval.py`, `src/embeddings.py`, `src/rerank.py` | TF-IDF (2.0), BM25 with a body-only discount, dense retrieval over a committed `gemini-embedding-2` index, and a hybrid with RRF and MMR |
@@ -134,22 +135,57 @@ python -m src.index verify      # checks the index matches the cards
 
 > **Note on model availability.** Measured 2026-11-14: a newly issued free key gets `404` on `gemini-flash-latest` and is told `gemini-2.5-flash` is *"no longer available to new users"*. `GENERATION_MODELS` in `src/config.py` therefore leads with `gemini-3.5-flash`. If your key 404s on everything, run `python -m src.index info` and check which models your key lists — then reorder that chain. The system runs offline regardless.
 
+**6. Optional: switch the generation model to NVIDIA Nemotron**
+
+Get a key at [build.nvidia.com](https://build.nvidia.com) (it starts `nvapi-`) and add it to `.env`:
+
+```
+NVIDIA_API_KEY=nvapi-...
+VIBEFINDER_LLM=nvidia
+```
+
+Or switch for a single run, or pick a specific model:
+
+```bash
+python -m src.main --provider nvidia "something calm for studying late at night"
+```
+
+```bash
+python -m src.main --provider nvidia --model nvidia/nemotron-3-ultra-550b-a55b "pump me up for the gym"
+```
+
+In the app, open **Settings** and choose **Model provider** and **Model**.
+
+**What switches, and what deliberately doesn't.** The provider decides which model *understands*
+the request, *reranks* context cards and *writes the explanations*. Dense retrieval stays on the
+committed Gemini embedding index whichever provider you choose. That index and its calibration
+belong to the embedding model that built them, and swapping the embedder silently would mis-scale
+every evidence threshold: the exact bug class described under
+[the main finding](#the-main-finding-an-improved-retriever-had-silently-disabled-the-refusal-guardrail).
+So `--provider nvidia` with no Gemini key still works, using lexical retrieval, and says so in the trace.
+
+The default chain is `nvidia/nemotron-3-super-120b-a12b`, then `nvidia/nemotron-3-ultra-550b-a55b`.
+Override it with `NVIDIA_MODELS` (comma-separated) without a code change.
+
 ### All the commands
 
 ```bash
 streamlit run app/streamlit_app.py                          # the app
 python -m src.main "something calm for studying late at night"
 python -m src.main --interactive                            # follow-ups refine the last answer
+python -m src.main --provider nvidia "rainy day blues"      # Nemotron understands and explains
+python -m src.main --provider gemini --model gemini-3.5-flash-lite "late night drive"
 python -m src.main --trace "lofi at maximum energy, not acoustic"
-python -m pytest                                            # 426 tests, offline, no key
+python -m pytest                                            # 486 tests, offline, no key
 python -m src.evaluate --injection                           # harness + ablation + injection suite
-python tools/mutate.py                                      # do the tests notice 67 planted bugs?
+python tools/mutate.py                                      # do the tests notice 74 planted bugs?
 python -m src.compare_explainers                             # baseline vs constrained explanations
 python tools/build_catalog.py                                # rebuild data/songs.csv from the source dataset
 ```
 
 ### The app
 
+- **Settings.** Choose the **Model provider** (Gemini or NVIDIA Nemotron) and the **Model**, toggle the LLM on or off, pick the retriever. Every label, from the status bar to the call counter, follows the provider actually answering. A provider without a key shows as off, never as on.
 - **Discover.** A request, or a follow-up to the last one. The top pick shows its cover art, a 30-second preview, its fit and an explanation; *"Why this track"* breaks down the score. Beside it: the agent's confidence, the review state with its own message, the listening contexts it used, and which parser and retriever ran. *"Where the picks land"* plots the request's target ranges for energy, danceability and acousticness against where each pick actually falls. Then the other picks, then the full agent trace.
 - **Compare.** The same request ranked with retrieval off and on, side by side.
 - **Evaluation.** The retrieval ablation on the labelled benchmark, Hit@1 by request type, and the requests each retriever misses.
@@ -371,8 +407,8 @@ Full detail, including the adversarial probing table and what surprised me, is i
 
 | Evaluation | Command | Offline (no key) | With Gemini |
 |---|---|---|---|
-| Unit and behaviour tests | `python -m pytest` | **426 / 426 pass** | same (suite never uses the network) |
-| Mutation check | `python tools/mutate.py` | **67 / 67** planted bugs caught | — |
+| Unit and behaviour tests | `python -m pytest` | **486 / 486 pass** | same (suite never uses the network) |
+| Mutation check | `python tools/mutate.py` | **74 / 74** planted bugs caught | — |
 | Behaviour harness | `python -m src.evaluate` | **33 / 33** pass, 7 Gemini-only cases SKIP | **35 / 40** pass |
 | Prompt-injection suite | `python -m src.evaluate --injection` | **26 / 26** handled safely | **26 / 26** handled safely |
 | Retrieval lift (situational requests) | included above | 2/9 → **9/9** correct top result | 2/9 → **7/9** |
@@ -522,7 +558,7 @@ bug, and four new mutants, each re-introducing one cause, that the suite must ca
 - Calibration uses a **disjoint** query set
   ([`calibration_queries.json`](data/eval/calibration_queries.json)); a test enforces no overlap.
 - Gemini-only cases are reported as SKIP offline, **never counted as passes**.
-- `tools/mutate.py` plants **67 realistic bugs** one at a time and requires the suite to fail on
+- `tools/mutate.py` plants **74 realistic bugs** one at a time and requires the suite to fail on
   every one — it tests the tests.
 - Three tests check the documentation itself: the embedded diagram must match its source, every
   relative link must resolve, and the test count quoted in the docs must equal the number the
@@ -544,7 +580,7 @@ bug, and four new mutants, each re-introducing one cause, that the suite must ca
   the 30 cards are embedded once at build time and every call is cached by content hash. A demo
   costs a handful of calls and the evaluation is reproducible. *This was also load-bearing for
   honesty:* it is why two live runs agree exactly.
-- **The offline path is a real product, not an error page.** All 426 tests run without a
+- **The offline path is a real product, not an error page.** All 486 tests run without a
   network; the UI and CLI always say which path ran and why.
 - **A real catalog, curated deterministically.** Popularity-first, at most 2 songs per artist,
   build script committed. *Trade-off:* it inherits the source's biases (see
@@ -565,7 +601,17 @@ bug, and four new mutants, each re-introducing one cause, that the suite must ca
   than acted on it. A larger benchmark would settle it.
 - **A fallback chain, not a pinned model.** Written before Google retired the pinned model out
   from under the project; four entries, and the test for it deliberately reads the chain from
-  settings rather than naming models.
+  settings rather than naming models. The NVIDIA client uses the same mechanism.
+- **A switchable generation model, a fixed embedding model.** Both providers sit on one shared
+  base (`src/llm_base.py`), so retry, fallback, caching and the offline path behave identically.
+  Nemotron's output goes through exactly the same validators as Gemini's, and the full 26-attack
+  hijacked-model suite runs against both. Embeddings are deliberately *not* switchable, for the
+  reason given in setup step 6. *Trade-off:* the NVIDIA path still needs a Gemini key for dense
+  retrieval; without one, it uses lexical retrieval.
+- **Nemotron runs with reasoning off and guided JSON on.** Understanding and explanations are
+  short schema-constrained tasks, so the hidden reasoning trace would add latency without
+  improving the answer. If an endpoint refuses `guided_json`, the client retries once without it.
+  The schema is in the prompt either way, and the reply is validated locally either way.
 
 ---
 
@@ -591,6 +637,10 @@ Details and the full bias discussion are in the [model card](model_card.md#2-sys
 - **The explanation validator catches shape, not truth.** It rejects stray numbers and
   miscited cards but cannot detect an invented qualitative claim.
 - **Confidence measures fit to your request**, not whether you will like the songs.
+- **The NVIDIA path is tested offline, not yet measured live.** 58 tests and 7 mutants cover it
+  against a fake endpoint that raises the real SDK's exceptions, but no live evaluation has run on
+  Nemotron yet, so the harness numbers above are Gemini's. Run
+  `VIBEFINDER_LLM=nvidia python -m src.evaluate --injection` with a key to produce them.
 
 ---
 
@@ -598,12 +648,13 @@ Details and the full bias discussion are in the [model card](model_card.md#2-sys
 
 ```
 app/            Streamlit app (streamlit_app.py) and its presentation helpers (ui.py)
-src/            agent, understanding, gemini client, retrieval (+ embeddings, rerank), profile,
-                scoring, guardrails, llm, session, enrich, CLI, evaluate, index
+src/            agent, understanding, LLM clients (llm_base, gemini, nvidia, providers),
+                retrieval (+ embeddings, rerank), profile, scoring, guardrails, llm, session,
+                enrich, CLI, evaluate, index
 data/           songs.csv (580 tracks) + CATALOG_PROVENANCE.md, knowledge/ (30 cards),
                 index/ (committed embedding index + calibration), eval/ (gold set,
                 calibration set, injection suite)
-tests/          426 tests; fixtures/ keeps the 2.0 catalog and cards the older tests pin
+tests/          486 tests; fixtures/ keeps the 2.0 catalog and cards the older tests pin
 tools/          build_catalog.py, mutate.py
 diagrams/       architecture.mmd (canonical Mermaid source), architecture.md (rendered + prose)
 assets/         architecture.svg (vector export of the diagram)

@@ -16,12 +16,12 @@ flowchart TD
 
     H1[["H1 human checkpoint<br/>crisis-line info surfaced,<br/>answer flagged"]] --> UND
 
-    subgraph GEM["Gemini (src/gemini.py: retry, model fallback, disk cache, accounting)"]
+    subgraph GEM["Generation LLM, switchable: Gemini (src/gemini.py) or NVIDIA Nemotron (src/nvidia.py)<br/>chosen in src/providers.py; shared retry, model fallback, disk cache, accounting in src/llm_base.py"]
         UND[Query understanding<br/>src/understanding.py<br/>JSON schema with catalog enums]
-        QE[Query embedding<br/>gemini-embedding-2, 768-d]
         RR[Optional rerank<br/>src/rerank.py]
         EXP[Batched grounded explanations<br/>src/llm.py]
     end
+    QE[Query embedding, always Gemini<br/>gemini-embedding-2, 768-d<br/>matches the committed index]
 
     UND --> T1[["T1 testing checkpoint<br/>validate intent: drop values<br/>outside catalog enums,<br/>clamp ranges to 0-1,<br/>strip instruction-like text"]]
     T1 -- "validated Intent" --> PLAN
@@ -73,8 +73,8 @@ flowchart TD
     H4 -. "follow-up" .-> U
 
     subgraph TESTING["T3/T4 offline reliability gates (CI-style, no network)"]
-        T3[["T3 pytest: 426 tests<br/>against a fake Gemini SDK,<br/>incl. a fully hijacked model"]]
-        T4[["T4 src/evaluate.py: behaviour cases,<br/>retrieval ablation on 44 labelled queries,<br/>26-attack injection suite;<br/>tools/mutate.py: 67 planted bugs"]]
+        T3[["T3 pytest: 486 tests<br/>against fake Gemini and NVIDIA SDKs,<br/>incl. a fully hijacked model"]]
+        T4[["T4 src/evaluate.py: behaviour cases,<br/>retrieval ablation on 44 labelled queries,<br/>26-attack injection suite;<br/>tools/mutate.py: 74 planted bugs"]]
     end
     T3 -.->|gates| AGENT
     T4 -.->|gates| RAG

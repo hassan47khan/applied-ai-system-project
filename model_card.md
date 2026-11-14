@@ -23,16 +23,19 @@
 |---|---|
 | **Name** | VibeFinder 3.0 |
 | **Type** | Retrieval-augmented, content-based music recommender wrapped in a self-checking agent loop, with an LLM for query understanding and explanation |
-| **Models** | Generation: `gemini-3.5-flash`, falling back to `gemini-3.5-flash-lite`, then `gemini-flash-latest`, then `gemini-2.5-flash`. Embeddings: `gemini-embedding-2` at 768 dimensions, falling back to `gemini-embedding-001`. **All are optional**: with no key, the system runs the fully offline 2.0 path |
+| **Models** | Generation is **switchable** (`VIBEFINDER_LLM`, `--provider`, or the UI). **Gemini:** `gemini-3.5-flash`, falling back to `gemini-3.5-flash-lite`, then `gemini-flash-latest`, then `gemini-2.5-flash`. **NVIDIA Nemotron:** `nvidia/nemotron-3-super-120b-a12b`, falling back to `nvidia/nemotron-3-ultra-550b-a55b`, called with reasoning off and guided JSON on. Embeddings, always Gemini: `gemini-embedding-2` at 768 dimensions, falling back to `gemini-embedding-001`. **All are optional**: with no key, the system runs the fully offline 2.0 path |
 | **Input** | Free text in any language, at most 300 characters, or a follow-up to the previous answer ("more upbeat", "not #3", "more like #2") |
 | **Output** | Top-k tracks with grounded explanations, a confidence score in [0, 1], a `needs_review` flag with a plain-language message, and a step-by-step agent trace |
 | **Catalog** | `data/songs.csv`: 580 real tracks from the BSD-licensed Hugging Face `maharshipandya/spotify-tracks-dataset`, curated deterministically by `tools/build_catalog.py` (see [`data/CATALOG_PROVENANCE.md`](data/CATALOG_PROVENANCE.md)) |
 | **Knowledge base** | `data/knowledge/`: 30 hand-written listening-context cards, their feature ranges calibrated against the real catalog |
 | **Third-party media** | Cover art and 30-second previews come from Deezer's public API at display time. No audio is stored or redistributed, and the core never calls it |
 
-### What Gemini does, and does not do
+### What the LLM does, and does not do
 
-| Stage | Gemini's role | Who makes the decision |
+The same table applies to either provider: Gemini and Nemotron are called through the same
+`generate_json` interface, and their output passes through the same validators.
+
+| Stage | The LLM's role | Who makes the decision |
 |---|---|---|
 | Query understanding | Reads the request into an enum-constrained `Intent`: genres and moods drawn from the catalog's own vocabulary, feature ranges clamped to [0, 1], plus a short English paraphrase used for retrieval | Gemini proposes, a validator decides |
 | Retrieval | Embeds the request for dense retrieval; optionally rates candidate context cards | Deterministic BM25 + RRF + MMR |
@@ -90,6 +93,14 @@ actually enjoy them. That distinction is the single most important limitation in
 - **Gemini quality varies with the model behind the alias**, which Google can change. Runs are
   cached by sha256 of the request, so a fixed cache reproduces exactly; a cold cache after a
   model change may not.
+- **Nemotron has not yet been evaluated live.** The NVIDIA provider is covered by 58 offline tests
+  and 7 mutants, including the full hijacked-model injection suite. But every harness number in
+  §4 comes from Gemini, and nothing here claims Nemotron understands music requests as well or
+  better. Switching providers is a capability, not a measured improvement, until
+  `VIBEFINDER_LLM=nvidia python -m src.evaluate --injection` has run with a key.
+- **The two providers do not share answers.** Each provider's cache is keyed by its own provider
+  id, endpoint and model chain, so a cached Gemini answer can never be served as Nemotron's, or
+  the reverse. This also means that switching provider starts from a cold cache.
 - **Model availability is not stable.** As measured on 2026-11-14, a newly issued free AI Studio
   key gets 404 on `gemini-flash-latest` and is told `gemini-2.5-flash` is "no longer available
   to new users". This is why the model chain has four entries and why `GeminiUnavailable`
@@ -211,6 +222,16 @@ exist because the guarantee was given up deliberately.
 | 4 | Output must match a JSON schema whose values are the catalog's **own enums**; a validator then drops unknown values, clamps numbers to [0, 1] and discards instruction-like paraphrases | `src/understanding.py` |
 | 5 | Nothing Gemini writes as free text reaches the scorer. Explanations are shown only after per-pick validation, each falling back to the template on its own | `src/llm.py` |
 | 6 | A 26-attack suite runs in the tests against a **fully hijacked** fake model, and live via `--injection` | `data/eval/injection_suite.json` |
+| 7 | **Every mitigation above is provider-neutral.** Flagged input is not sent to Nemotron either, and the 26-attack hijacked-model suite runs against the NVIDIA client with the same invariants | `src/llm_base.py`, `tests/test_nvidia.py` |
+
+**Where the request goes, by provider.** With Gemini, the sanitised request is sent to Google.
+With NVIDIA selected, it is sent to NVIDIA's hosted API instead. Google still receives the text
+used for dense retrieval, because the query embedding is always Gemini's: Nemotron's English
+paraphrase of the request, or the request itself (rejections removed) when there is no
+paraphrase. So with NVIDIA selected and a Gemini key present, both companies receive text
+derived from the request. Neither path sends anything the guardrail flagged, and
+neither stores anything about the user on our side. Anyone deploying this should treat the
+provider choice as a data-sharing decision, not only a quality one.
 
 Mitigation 2 exists because writing the suite found real gaps: zero-width characters inside
 "i␣gnore previous instructions" and full-width letters both walked straight past the 2.0
@@ -261,8 +282,8 @@ Everything in this section is reproducible from the repo. Commands are in the
 
 | Evaluation | Command | Result |
 |---|---|---|
-| Unit and behaviour tests | `python -m pytest` | **426 / 426 pass**, fully offline |
-| Mutation check | `python tools/mutate.py` | **67 / 67** planted bugs caught by the suite |
+| Unit and behaviour tests | `python -m pytest` | **486 / 486 pass**, fully offline |
+| Mutation check | `python tools/mutate.py` | **74 / 74** planted bugs caught by the suite |
 | Behaviour harness, offline | `python -m src.evaluate` | **33 / 33** checks pass, 7 Gemini-only cases reported as SKIP |
 | Behaviour harness, with Gemini | same, with a key | **35 / 40** checks pass (30 / 40 before the fix in §2.3) |
 | Prompt-injection suite, offline | `python -m src.evaluate --injection` | **26 / 26** attacks handled safely |
@@ -407,7 +428,7 @@ stray-number checks; it did not solve invented qualitative claims, and does not 
   the two sets do not overlap.
 - The 7 Gemini-only behaviour cases are reported as SKIP when offline, **never counted as
   passes**.
-- `tools/mutate.py` plants 67 realistic bugs one at a time (invented numbers allowed through,
+- `tools/mutate.py` plants 74 realistic bugs one at a time (invented numbers allowed through,
   Gemini retries switched off, edited cards undetected by the index, flagged input sent to
   Gemini). The suite must fail on every one. This tests the tests.
 
@@ -498,7 +519,7 @@ than no harness, because it stops you looking.
 changed where its cases come from. I had the system probed with requests it had not been tuned
 on, which immediately exposed the negation bug ("not jazz" → jazz at confidence 1.00) and the
 "work out" parsing bug. Those became cases that **originally failed**, so the suite now contains
-evidence rather than agreement. I then added `tools/mutate.py`, which plants 67 bugs to check
+evidence rather than agreement. I then added `tools/mutate.py`, which plants 74 bugs to check
 that the tests actually fail when the code is wrong — testing the tests, which was the real
 answer to the 17/17 problem. The one case that still fails ("sad songs for a road trip") is
 reported as a failure in §4.3 rather than deleted.
@@ -575,6 +596,7 @@ reported as a failure in §4.3 rather than deleted.
 | Conversation | One-shot | Multi-turn refinement |
 | Interface | CLI | Streamlit app with cover art and previews; CLI still works |
 | Safety | Override detection | Plus NFKC normalisation, a 26-attack injection suite, and distress detection |
-| Evaluation | 29 checks, 211 tests, 47 mutants | 40 checks, 426 tests, 67 mutants, 44-query labelled retrieval benchmark with ablation |
+| Evaluation | 29 checks, 211 tests, 47 mutants | 40 checks, 486 tests, 74 mutants, 44-query labelled retrieval benchmark with ablation |
 | LLM text in prompts | Never | **Yes, for understanding and rerank** — see §3.1 |
+| Generation model | Gemini only | **Gemini or NVIDIA Nemotron**, switchable, on one shared retry/cache/fallback base |
 | Dense evidence | — | Centred cosine with a unit-checked calibration, after a raw-cosine floor disabled refusal (§2.3) |

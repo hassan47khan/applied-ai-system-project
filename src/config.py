@@ -7,7 +7,14 @@ code changes. Scoring and verification thresholds stay next to the code that use
 (agent.py, recommender.py) because they are tuned together with it.
 
     GEMINI_API_KEY            enables every Gemini feature; without it the app runs offline
-    VIBEFINDER_USE_GEMINI     "0" forces the offline path even when a key is set
+    VIBEFINDER_USE_GEMINI     "0" forces the offline path even when a key is set (every
+                              provider: the name predates NVIDIA support)
+    VIBEFINDER_LLM            gemini | nvidia: which model understands requests, reranks and
+                              writes explanations (default: gemini)
+    VIBEFINDER_LLM_MODEL      try this model first for the chosen provider
+    NVIDIA_API_KEY            enables the NVIDIA (Nemotron) provider; from build.nvidia.com
+    NVIDIA_BASE_URL           OpenAI-compatible endpoint (default: NVIDIA's hosted API)
+    NVIDIA_MODELS             comma-separated fallback chain for NVIDIA
     VIBEFINDER_RETRIEVAL      tfidf | bm25 | dense | hybrid   (default: hybrid)
     VIBEFINDER_RERANK         "1" adds a Gemini rerank of the top cards (default: off)
     VIBEFINDER_SONGS          path to the song catalog CSV
@@ -37,6 +44,17 @@ GENERATION_MODELS: Tuple[str, ...] = (
     "gemini-2.5-flash",
 )
 EMBEDDING_MODELS: Tuple[str, ...] = ("gemini-embedding-2", "gemini-embedding-001")
+
+LLM_PROVIDERS = ("gemini", "nvidia")
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+# Nemotron 3, served on NVIDIA's hosted OpenAI-compatible API (build.nvidia.com). Ultra is the
+# chosen model for this project; Super stays as the fallback if Ultra is retired or overloaded.
+# Model ids get retired (every Gemini id in the first chain did), so this is a chain, and
+# NVIDIA_MODELS overrides it without a code change.
+NVIDIA_MODELS: Tuple[str, ...] = (
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "nvidia/nemotron-3-super-120b-a12b",
+)
 EMBEDDING_DIM = 768
 
 
@@ -73,6 +91,19 @@ def _real_key(value: Optional[str]) -> Optional[str]:
     return None if not value or value.lower() in _PLACEHOLDER_KEYS else value
 
 
+def _chain(env: str, default: Tuple[str, ...]) -> Tuple[str, ...]:
+    """A comma-separated model list from the environment, or the default chain."""
+    names = tuple(n.strip() for n in (os.environ.get(env) or "").split(",") if n.strip())
+    return names or default
+
+
+def _first(model: Optional[str], chain: Tuple[str, ...]) -> Tuple[str, ...]:
+    """Put `model` at the head of `chain`, keeping the rest as fallbacks, without duplicates."""
+    if not model:
+        return chain
+    return (model,) + tuple(m for m in chain if m != model)
+
+
 def _flag(env: str, default: bool) -> bool:
     value = os.environ.get(env)
     if value is None or value == "":
@@ -94,15 +125,46 @@ class Settings:
     embedding_models: Tuple[str, ...] = EMBEDDING_MODELS
     embedding_dim: int = EMBEDDING_DIM
     request_timeout_s: float = 20.0
+    nvidia_timeout_s: float = 90.0      # the hosted 550B Ultra answers slower than Gemini Flash
+    llm_provider: str = field(default_factory=lambda: (os.environ.get("VIBEFINDER_LLM") or "gemini")
+                              .strip().lower())
+    llm_model: Optional[str] = None     # None: VIBEFINDER_LLM_MODEL, if it was set for this provider
+    nvidia_api_key: Optional[str] = field(default_factory=lambda: _real_key(os.environ.get("NVIDIA_API_KEY")))
+    nvidia_base_url: str = field(default_factory=lambda: os.environ.get("NVIDIA_BASE_URL") or NVIDIA_BASE_URL)
+    nvidia_models: Tuple[str, ...] = field(default_factory=lambda: _chain("NVIDIA_MODELS", NVIDIA_MODELS))
 
     def __post_init__(self) -> None:
         if self.retrieval_mode not in RETRIEVAL_MODES:
             raise ValueError(f"VIBEFINDER_RETRIEVAL must be one of {RETRIEVAL_MODES}, "
                              f"got {self.retrieval_mode!r}")
+        if self.llm_provider not in LLM_PROVIDERS:
+            raise ValueError(f"VIBEFINDER_LLM must be one of {LLM_PROVIDERS}, got {self.llm_provider!r}")
+        # VIBEFINDER_LLM_MODEL names a model of VIBEFINDER_LLM's provider. Settings built for a
+        # different provider (the CLI's --provider, the UI's selector) must not inherit it, or
+        # an NVIDIA model name would be sent to Gemini first. An explicit llm_model always wins.
+        if self.llm_model is None:
+            env_provider = (os.environ.get("VIBEFINDER_LLM") or "gemini").strip().lower()
+            if env_provider == self.llm_provider:
+                self.llm_model = (os.environ.get("VIBEFINDER_LLM_MODEL") or "").strip() or None
+        # The override goes ahead of that provider's own fallbacks, never into the other's chain.
+        if self.llm_provider == "gemini":
+            self.generation_models = _first(self.llm_model, self.generation_models)
+        else:
+            self.nvidia_models = _first(self.llm_model, self.nvidia_models)
 
     @property
     def gemini_enabled(self) -> bool:
         return self.use_gemini and bool(self.api_key)
+
+    @property
+    def nvidia_enabled(self) -> bool:
+        # The offline switch is provider-neutral: --offline means no model is called at all.
+        return self.use_gemini and bool(self.nvidia_api_key)
+
+    @property
+    def llm_enabled(self) -> bool:
+        """Can the chosen generation provider be called?"""
+        return self.nvidia_enabled if self.llm_provider == "nvidia" else self.gemini_enabled
 
 
 def get_settings(**overrides) -> Settings:

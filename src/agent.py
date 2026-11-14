@@ -126,9 +126,9 @@ class VibeFinderAgent:
         self.genre_vocab = sorted({s["genre"] for s in self.songs})
         self.mood_vocab = sorted({s["mood"] for s in self.songs})
         if understander == "auto":
-            from .gemini import shared_client
+            from .providers import shared_llm
             from .understanding import GeminiUnderstander
-            client = shared_client()
+            client = shared_llm()      # Gemini or NVIDIA, per VIBEFINDER_LLM
             understander = (GeminiUnderstander(client, self.genre_vocab, self.mood_vocab)
                             if client.available else None)
         self.understander = understander
@@ -211,16 +211,17 @@ class VibeFinderAgent:
             return None
         if any("instruction-override" in w for w in result.warnings):
             # Defence in depth: text that already looks like an attack never reaches the LLM.
-            _step(result, "understand", "rule-based parser (input flagged by guardrail; not sent to Gemini)")
+            _step(result, "understand", "rule-based parser (input flagged by guardrail; not sent to the LLM)")
             return None
         try:
             intent = self.understander.parse(text)
         except GeminiUnavailable as exc:
             _step(result, "understand", f"rule-based parser (fallback: {exc.reason})")
             return None
-        result.parser = "gemini"
+        provider = getattr(getattr(self.understander, "client", None), "provider", "gemini")
+        result.parser = provider
         result.intent = {k: v for k, v in vars(intent).items()}
-        _step(result, "understand", "gemini: " + intent.describe()
+        _step(result, "understand", f"{provider}: " + intent.describe()
               + (f"; validator dropped {', '.join(intent.dropped)}" if intent.dropped else ""))
         return intent
 
@@ -333,8 +334,9 @@ class VibeFinderAgent:
                 explanation=text, explained_by=source, cited_card=cited,
             ))
         if explained:
-            n = sum(src == "gemini" for _, src, _ in explained)
-            _step(result, "explain", f"gemini wrote {n}/{len(explained)} explanations"
+            n = sum(src != "template" for _, src, _ in explained)
+            writer = next((src for _, src, _ in explained if src != "template"), "the LLM")
+            _step(result, "explain", f"{writer} wrote {n}/{len(explained)} explanations"
                   + (f"; {len(explained) - n} fell back to the template" if n < len(explained) else ""))
 
         notes = [f"I relaxed a preference you gave: {relaxation}. Tell me if the original "

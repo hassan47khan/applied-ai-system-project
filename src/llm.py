@@ -122,7 +122,8 @@ class GroundedBatchExplainer:
         return self.explain_batch([(song, reasons, card)])[0][0]
 
     def explain_batch(self, items: List[Tuple[Dict, List[str], Optional[Card]]]) -> List[Tuple[str, str, Optional[str]]]:
-        """[(text, source, cited_card_id)] in the same order; source is "gemini" or "template"."""
+        """[(text, source, cited_card_id)] in the same order; source is the provider
+        ("gemini" or "nvidia") or "template"."""
         fallbacks = [self.fallback.explain(s, r, c) for s, r, c in items]
         card_ids = sorted({c.id for _, _, c in items if c is not None}) + ["none"]
         blocks = []
@@ -158,7 +159,8 @@ class GroundedBatchExplainer:
             if problem:
                 log.warning("Explanation for %r rejected: %s", song["title"], problem)
                 continue
-            out[i] = (text.strip(), "gemini", card.id if card and cited == card.id else None)
+            source = getattr(self.client, "provider", "gemini")
+            out[i] = (text.strip(), source, card.id if card and cited == card.id else None)
         self.last_sources = [src for _, src, _ in out]
         return out
 
@@ -179,11 +181,11 @@ class GroundedBatchExplainer:
 
 
 def make_explainer(use_llm: bool) -> Explainer:
-    """Gemini if requested and available, otherwise the offline template."""
+    """The configured LLM (Gemini or NVIDIA) if requested and available, else the template."""
     if not use_llm:
         return TemplateExplainer()
-    from .gemini import shared_client
-    client = shared_client()
+    from .providers import shared_llm
+    client = shared_llm()
     if not client.available:
         log.warning("LLM explanations unavailable (%s); using offline templates", client.unavailable_reason())
         return TemplateExplainer()

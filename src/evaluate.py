@@ -8,7 +8,8 @@ Evaluation harness: runs VibeFinder on predefined inputs and prints a pass/fail 
 
 Checks:
   1. Behaviour cases   does the right kind of song come first, and is the agent honest
-                       (flags / refuses) when it should be? Cases marked `needs_gemini`
+                       (flags / refuses) when it should be? Cases marked `needs_gemini` (named
+                       before NVIDIA support; any configured LLM satisfies it)
                        exercise what only the Gemini path can do (synonyms, other
                        languages, several intents); offline they are reported as SKIP.
   2. Robustness cases  empty, huge, non-text and instruction-override input must not crash.
@@ -199,7 +200,9 @@ def run_ablation(print_misses: bool = False) -> None:
     settings = get_settings()
     cards = load_cards(settings.knowledge_dir)
     queries = load_queries()
-    gemini_ok = shared_client().available
+    gemini_ok = shared_client().available        # dense arms: the index is Gemini-embedded
+    from .providers import shared_llm
+    llm_ok = shared_llm().available              # the rerank arm: whichever LLM is configured
     arms = [("tfidf", "tfidf", False), ("bm25", "bm25", False), ("dense", "dense", False),
             ("hybrid", "hybrid", False), ("hybrid+rerank", "hybrid", True)]
     print()
@@ -210,6 +213,9 @@ def run_ablation(print_misses: bool = False) -> None:
     for label, mode, rerank in arms:
         if mode in {"dense", "hybrid"} and (label != "hybrid" or rerank) and not gemini_ok:
             print(f"  {label:<14} skipped (Gemini {shared_client().unavailable_reason()})")
+            continue
+        if rerank and not llm_ok:
+            print(f"  {label:<14} skipped ({shared_llm().label} {shared_llm().unavailable_reason()})")
             continue
         retriever, notes = make_retriever(cards, mode=mode, settings=settings.__class__(rerank=rerank))
         info = lambda: bool((getattr(retriever, "last_info", {}) or {}).get("fallback"))  # noqa: E731
@@ -275,11 +281,13 @@ def main(argv=None) -> int:
     setup_logging(console_level=logging.CRITICAL)  # keep the table readable; details go to logs/
     from .gemini import shared_client
     from .llm import make_explainer
-    gemini = shared_client()
+    from .providers import describe, shared_llm
+    gemini = shared_client()          # embeddings (dense retrieval) are always Gemini
+    llm = shared_llm()                # understanding / rerank / explanations: VIBEFINDER_LLM
     agent = VibeFinderAgent(explainer=make_explainer(False))
     baseline = VibeFinderAgent(use_retrieval=False, explainer=make_explainer(False))
 
-    path = "gemini" if gemini.available else f"offline ({gemini.unavailable_reason()})"
+    path = llm.provider if llm.available else f"offline ({llm.label} {llm.unavailable_reason()})"
     print(f"VibeFinder 3.0 evaluation  [path: {path}, catalog: {len(agent.songs)} songs, "
           f"{len(agent.cards)} context cards]")
     print("=" * 90)
@@ -291,10 +299,10 @@ def main(argv=None) -> int:
     confidences_ok: List[float] = []
     confidences_flagged: List[float] = []
     for i, case in enumerate(CASES, start=1):
-        if case.needs_gemini and not gemini.available:
+        if case.needs_gemini and not llm.available:
             results.append(None)
             skipped += 1
-            print(f"{i:>2}  {case.name:<38} {case.kind:<11} {'':>5} {'':>6}  SKIP (needs Gemini)")
+            print(f"{i:>2}  {case.name:<38} {case.kind:<11} {'':>5} {'':>6}  SKIP (needs an LLM)")
             continue
         result = agent.run(case.query)
         results.append(result)
@@ -339,11 +347,15 @@ def main(argv=None) -> int:
 
     injection_failures = run_injection(agent) if args.injection else 0
 
-    if gemini.stats.calls or gemini.stats.cache_hits:
-        s = gemini.stats
-        print()
-        print(f"Gemini usage: {s.calls} calls, {s.cache_hits} cache hits, {s.failures} failures, "
-              f"{s.prompt_tokens + s.output_tokens} tokens")
+    clients = [(describe(llm), llm)]
+    if llm is not gemini:                       # NVIDIA generating, Gemini still embedding
+        clients.append(("Gemini embeddings", gemini))
+    for name, client in clients:
+        st = client.stats
+        if st.calls or st.cache_hits:
+            print()
+            print(f"{name} usage: {st.calls} calls, {st.cache_hits} cache hits, {st.failures} failures, "
+                  f"{st.prompt_tokens + st.output_tokens} tokens")
 
     if args.traces:
         with open(args.traces, "w", encoding="utf-8") as f:

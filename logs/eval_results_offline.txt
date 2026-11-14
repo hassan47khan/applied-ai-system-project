@@ -1,4 +1,4 @@
-VibeFinder 3.0 evaluation  [path: offline (disabled), catalog: 580 songs, 30 context cards]
+VibeFinder 3.0 evaluation  [path: offline (Gemini disabled), catalog: 580 songs, 30 context cards]
 ==========================================================================================
  #  case                                   kind         conf review  result
 ------------------------------------------------------------------------------------------
@@ -29,13 +29,13 @@ VibeFinder 3.0 evaluation  [path: offline (disabled), catalog: 580 songs, 30 con
 25  impossible combo (adversarial)         behaviour    0.40    yes  PASS
 26  vague: lone incidental word            behaviour    0.49    yes  PASS
 27  gibberish                              behaviour    0.00    yes  PASS
-28  synonym: 'bummed out'                  behaviour                 SKIP (needs Gemini)
-29  synonym: 'livid'                       behaviour                 SKIP (needs Gemini)
-30  synonym: 'dumped'                      behaviour                 SKIP (needs Gemini)
-31  non-English: Spanish study             behaviour                 SKIP (needs Gemini)
-32  non-English: German jogging            behaviour                 SKIP (needs Gemini)
-33  multi-intent: sad road trip            behaviour                 SKIP (needs Gemini)
-34  multi-intent negation                  behaviour                 SKIP (needs Gemini)
+28  synonym: 'bummed out'                  behaviour                 SKIP (needs an LLM)
+29  synonym: 'livid'                       behaviour                 SKIP (needs an LLM)
+30  synonym: 'dumped'                      behaviour                 SKIP (needs an LLM)
+31  non-English: Spanish study             behaviour                 SKIP (needs an LLM)
+32  non-English: German jogging            behaviour                 SKIP (needs an LLM)
+33  multi-intent: sad road trip            behaviour                 SKIP (needs an LLM)
+34  multi-intent negation                  behaviour                 SKIP (needs an LLM)
 35  empty input                            robustness   0.00    yes  PASS
 36  whitespace only                        robustness   0.00    yes  PASS
 37  non-text input                         robustness   0.00    yes  PASS

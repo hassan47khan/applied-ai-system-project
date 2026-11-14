@@ -29,6 +29,7 @@ from src.config import RETRIEVAL_MODES, get_settings  # noqa: E402
 from src.embeddings import make_retriever  # noqa: E402
 from src.enrich import lookup  # noqa: E402
 from src.gemini import GeminiClient, shared_client  # noqa: E402
+from src.providers import PROVIDER_NAMES, make_llm  # noqa: E402
 from src.llm import GroundedBatchExplainer, TemplateExplainer  # noqa: E402
 from src.log_setup import setup_logging  # noqa: E402
 from src.recommender import load_songs  # noqa: E402
@@ -60,20 +61,37 @@ def catalog():
     return load_songs(settings.songs_path), load_cards(settings.knowledge_dir)
 
 
+def provider_ready(provider: str) -> bool:
+    """Is there a key for this provider (and is the offline switch off)?"""
+    base = get_settings()
+    return base.nvidia_enabled if provider == "nvidia" else base.gemini_enabled
+
+
+def model_choices(provider: str):
+    base = get_settings()
+    return list(base.nvidia_models if provider == "nvidia" else base.generation_models)
+
+
 @st.cache_resource(show_spinner=False)
-def build_agent(use_gemini: bool, mode: str, rerank: bool, k: int):
+def build_agent(use_llm: bool, provider: str, model: str, mode: str, rerank: bool, k: int):
     songs, cards = catalog()
     base = get_settings()
-    settings = base.__class__(use_gemini=use_gemini and base.gemini_enabled, rerank=rerank)
+    settings = base.__class__(use_gemini=use_llm and provider_ready(provider), rerank=rerank,
+                              llm_provider=provider, llm_model=model or None)
+    # Embeddings (dense retrieval) are always Gemini: the committed index was built with it.
     client = shared_client() if settings.gemini_enabled else GeminiClient(settings=settings)
-    retriever, notes = make_retriever(cards, mode=mode, settings=settings, client=client)
+    # Generation (understanding, rerank, explanations) uses the chosen provider and model.
+    # Gemini on its default chain shares the embedding client, so its calls count together.
+    llm = client if provider == "gemini" and model == model_choices("gemini")[0] else make_llm(provider, settings)
+    retriever, notes = make_retriever(cards, mode=mode, settings=settings, client=client, llm=llm)
     genres = sorted({s["genre"] for s in songs})
     moods = sorted({s["mood"] for s in songs})
-    understander = GeminiUnderstander(client, genres, moods) if client.available else None
-    explainer = GroundedBatchExplainer(client) if client.available else TemplateExplainer()
+    understander = GeminiUnderstander(llm, genres, moods) if llm.available else None
+    explainer = GroundedBatchExplainer(llm) if llm.available else TemplateExplainer()
     agent = VibeFinderAgent(songs=songs, cards=cards, retriever=retriever, understander=understander,
                             explainer=explainer, k=k)
     agent.retrieval_notes = notes
+    agent.llm = llm
     return agent
 
 
@@ -85,29 +103,37 @@ def media(title: str, artist: str):
 
 def settings_state():
     s = st.session_state
-    s.setdefault("use_gemini", get_settings().gemini_enabled)
+    s.setdefault("provider", get_settings().llm_provider)
+    s.setdefault("use_gemini", provider_ready(s.provider))
     s.setdefault("mode", "hybrid")
     s.setdefault("rerank", False)
     s.setdefault("k", 5)
+    if s.get("llm_model") not in model_choices(s.provider):   # provider changed: reset the model,
+        s.llm_model = model_choices(s.provider)[0]             # and switch it on if it can be
+        s.use_gemini = provider_ready(s.provider)
+    if not provider_ready(s.provider):
+        s.use_gemini = False      # never show a provider as on when it has no key
     return s
 
 
-def status_line(agent: VibeFinderAgent, use_gemini: bool) -> str:
-    client = shared_client()
-    if not get_settings().gemini_enabled:
-        gem = "Offline (no Gemini key)"
+def status_line(agent: VibeFinderAgent, use_llm: bool) -> str:
+    provider = st.session_state.provider
+    name = PROVIDER_NAMES[provider]
+    if not provider_ready(provider):
+        gem = f"Offline (no {name} key)"
     else:
-        gem = "Gemini on" if use_gemini else "Gemini off"
+        gem = f"{name} on" if use_llm else f"{name} off"
     return f"{gem} · {MODE_LABELS[st.session_state.mode].split(' (')[0]} · {len(agent.songs)} tracks"
 
 
 # ------------------------------------------------------------------- shell
 st.html(ui.CSS)
 state = settings_state()
-agent = build_agent(state.use_gemini, state.mode, state.rerank, state.k)
-if "conversation" not in state or state.get("agent_key") != (state.use_gemini, state.mode, state.rerank, state.k):
+agent_key = (state.use_gemini, state.provider, state.llm_model, state.mode, state.rerank, state.k)
+agent = build_agent(*agent_key)
+if "conversation" not in state or state.get("agent_key") != agent_key:
     state.conversation = Conversation(agent)
-    state.agent_key = (state.use_gemini, state.mode, state.rerank, state.k)
+    state.agent_key = agent_key
 conversation: Conversation = state.conversation
 
 bar_left, bar_right = st.columns([5, 1], vertical_alignment="center")
@@ -115,17 +141,24 @@ with bar_left:
     st.html(ui.top_bar(status_line(agent, state.use_gemini)))
 with bar_right:
     with st.popover("Settings", use_container_width=True):
-        key_ok = get_settings().gemini_enabled
-        st.toggle("Use Gemini", key="use_gemini", disabled=not key_ok,
-                  help=None if key_ok else "Add GEMINI_API_KEY to .env to enable Gemini.")
+        st.selectbox("Model provider", list(PROVIDER_NAMES), key="provider", format_func=PROVIDER_NAMES.get,
+                     help="Which model understands requests, reranks and writes explanations. "
+                          "Dense retrieval always uses the Gemini embedding index.")
+        name = PROVIDER_NAMES[state.provider]
+        key_ok = provider_ready(state.provider)
+        env_key = "NVIDIA_API_KEY" if state.provider == "nvidia" else "GEMINI_API_KEY"
+        st.selectbox("Model", model_choices(state.provider), key="llm_model", disabled=not key_ok,
+                     help="The first model is tried first; if it is retired, the next one answers.")
+        st.toggle(f"Use {name}", key="use_gemini", disabled=not key_ok,
+                  help=None if key_ok else f"Add {env_key} to .env to enable {name}.")
         if not key_ok:
-            st.caption("No GEMINI_API_KEY found, so VibeFinder runs fully offline: rule-based "
-                       "parsing, lexical retrieval and template explanations.")
+            st.caption(f"No {env_key} found, so requests are parsed by rules and explained by "
+                       "templates. Dense retrieval still works if a Gemini key is set.")
         st.selectbox("Retrieval", RETRIEVAL_MODES[::-1], key="mode", format_func=MODE_LABELS.get)
-        st.toggle("Gemini rerank of context cards", key="rerank", disabled=not (key_ok and state.use_gemini))
+        st.toggle(f"{name} rerank of context cards", key="rerank", disabled=not (key_ok and state.use_gemini))
         st.slider("Tracks per answer", 1, 10, key="k")
-        stats = shared_client().stats
-        st.html(ui.kv([("Gemini calls", f"{stats.calls:,}"), ("Cache hits", f"{stats.cache_hits:,}"),
+        stats = agent.llm.stats
+        st.html(ui.kv([(f"{name} calls", f"{stats.calls:,}"), ("Cache hits", f"{stats.cache_hits:,}"),
                        ("Fallbacks", f"{stats.failures:,}"),
                        ("Tokens", f"{stats.prompt_tokens + stats.output_tokens:,}")]))
         if agent.retrieval_notes:
@@ -165,7 +198,8 @@ def render_lead(result, titles) -> None:
             with st.expander("Why this track"):
                 st.html(ui.kv([(r.rsplit(" (", 1)[0], r.rsplit(" (", 1)[1].rstrip(")") if " (" in r else "")
                                for r in rec.reasons]))
-                src = "Gemini, checked against the facts" if rec.explained_by == "gemini" else "the offline template"
+                src = (f"{PROVIDER_NAMES.get(rec.explained_by, rec.explained_by)}, checked against the facts"
+                       if rec.explained_by != "template" else "the offline template")
                 st.caption(f"Explanation written by {src}"
                            + (f"; grounded in the '{titles.get(rec.cited_card, rec.cited_card)}' card."
                               if rec.cited_card else "."))
@@ -181,8 +215,8 @@ def render_lead(result, titles) -> None:
                 st.html(f'<div class="vf-p vf-muted">{ui.e(result.message)}</div>')
             st.html('<div class="vf-section" style="margin-top:14px">Listening context</div>'
                     + ui.context_list(result.retrieved, titles)
-                    + ui.kv([("Understood by", "Gemini" if result.parser == "gemini" else
-                              "follow-up rules" if result.parser == "refine" else "rule parser"),
+                    + ui.kv([("Understood by", PROVIDER_NAMES.get(result.parser) or
+                              ("follow-up rules" if result.parser == "refine" else "rule parser")),
                              ("Retrieval", result.retrieval_mode or "-")]))
 
 

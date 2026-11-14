@@ -152,7 +152,7 @@ MUTATIONS: List[Mutation] = [
     Mutation("index: edited cards not detected", "src/embeddings.py",
              'elif entry.get("sha") != card_sha(card):', "elif False:"),
     # Gemini client
-    Mutation("gemini: no retry on rate limit", "src/gemini.py",
+    Mutation("llm: no retry on rate limit", "src/llm_base.py",
              "if _is_transient(exc) and attempt < self.max_attempts:", "if False:"),
     Mutation("gemini: cache never read", "src/gemini.py",
              "        cached = self.cache.get(key)\n", "        cached = None\n"),
@@ -184,6 +184,22 @@ MUTATIONS: List[Mutation] = [
              "if calibration is not None and calibration.signal != self.SIGNAL:", "if False:"),
     Mutation("calibration: unit dropped when loading", "src/embeddings.py",
              'str(values.get("signal", "native"))', '"centered"'),
+    # NVIDIA provider
+    Mutation("llm: HTTP status read from .code only", "src/llm_base.py",
+             'for attr in ("code", "status_code"):', 'for attr in ("code",):'),
+    Mutation("nvidia: cache never read", "src/nvidia.py",
+             "        cached = self.cache.get(key)\n", "        cached = None\n"),
+    Mutation("nvidia: reasoning left on", "src/nvidia.py",
+             'extra: Dict[str, Any] = {"chat_template_kwargs": {"enable_thinking": False}}',
+             'extra: Dict[str, Any] = {"chat_template_kwargs": {"enable_thinking": True}}'),
+    Mutation("nvidia: truncated reply accepted", "src/nvidia.py",
+             'if getattr(choice, "finish_reason", None) == "length":', "if False:"),
+    Mutation("nvidia: guided_json refusal not retried", "src/nvidia.py",
+             "            if not refused:", "            if True:"),
+    Mutation("nvidia: retired model not skipped", "src/nvidia.py",
+             "if _error_code(exc) in MODEL_GONE_CODES:", "if False:"),
+    Mutation("config: model override leaks across providers", "src/config.py",
+             "if env_provider == self.llm_provider:", "if True:"),
 ]
 
 

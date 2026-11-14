@@ -28,6 +28,10 @@ os.environ["VIBEFINDER_RETRIEVAL"] = "tfidf"
 os.environ["VIBEFINDER_USE_GEMINI"] = "0"
 os.environ["VIBEFINDER_RERANK"] = "0"
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["NVIDIA_API_KEY"] = ""           # nor an NVIDIA key, provider choice or model override
+os.environ["VIBEFINDER_LLM"] = "gemini"
+os.environ.pop("VIBEFINDER_LLM_MODEL", None)
+os.environ.pop("NVIDIA_MODELS", None)
 os.environ["VIBEFINDER_NO_MEDIA"] = "1"     # no Deezer calls from tests
 
 

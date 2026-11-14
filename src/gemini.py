@@ -12,64 +12,21 @@ Anything that can't be recovered raises `GeminiUnavailable`. Callers catch it an
 to the offline path, so the LLM is never a single point of failure.
 """
 
-import hashlib
 import json
 import logging
 import math
-import time
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from .config import Settings, get_settings
+from .llm_base import (  # noqa: F401  (re-exported: older code and tests import these from here)
+    MODEL_GONE_CODES, TRANSIENT_CODES, CallStats, DiskCache, LLMClientBase, LLMUnavailable,
+    _describe, _error_code, _is_transient,
+)
 
 log = logging.getLogger("vibefinder.gemini")
 
-TRANSIENT_CODES = {408, 429, 500, 502, 503, 504}
-MODEL_GONE_CODES = {404}
-
-
-class GeminiUnavailable(RuntimeError):
-    """Gemini can't answer right now (no key, quota, network, bad output...)."""
-
-    def __init__(self, reason: str):
-        super().__init__(reason)
-        self.reason = reason
-
-
-@dataclass
-class CallStats:
-    calls: int = 0
-    cache_hits: int = 0
-    failures: int = 0
-    prompt_tokens: int = 0
-    output_tokens: int = 0
-    latency_ms: float = 0.0
-    last_error: Optional[str] = None
-    by_purpose: Dict[str, int] = field(default_factory=dict)
-
-    def as_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
-def _error_code(exc: BaseException) -> Optional[int]:
-    code = getattr(exc, "code", None)
-    return code if isinstance(code, int) else None
-
-
-def _is_transient(exc: BaseException) -> bool:
-    if isinstance(exc, (TimeoutError, ConnectionError)):
-        return True
-    code = _error_code(exc)
-    if code in TRANSIENT_CODES:
-        return True
-    # httpx/httpx2 timeouts and connection errors don't carry a code.
-    return type(exc).__name__ in {"ReadTimeout", "ConnectTimeout", "ConnectError", "RemoteProtocolError"}
-
-
-def _describe(exc: BaseException) -> str:
-    code = _error_code(exc)
-    return f"{type(exc).__name__}{f' {code}' if code else ''}"
+# Kept as the name every caller already catches. It is the provider-neutral LLMUnavailable,
+# so `except GeminiUnavailable` also catches a failure from any other provider.
+GeminiUnavailable = LLMUnavailable
 
 
 def l2_normalize(vec: Sequence[float]) -> List[float]:
@@ -77,53 +34,9 @@ def l2_normalize(vec: Sequence[float]) -> List[float]:
     return [v / norm for v in vec] if norm else list(vec)
 
 
-class DiskCache:
-    """sha256-keyed JSON files. Corrupt or unreadable entries are treated as misses."""
-
-    def __init__(self, directory: Path):
-        self.directory = Path(directory)
-
-    @staticmethod
-    def key(*parts: Any) -> str:
-        blob = json.dumps(parts, sort_keys=True, ensure_ascii=False, default=str)
-        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
-
-    def _path(self, key: str) -> Path:
-        return self.directory / key[:2] / f"{key}.json"
-
-    def get(self, key: str) -> Optional[Any]:
-        try:
-            return json.loads(self._path(key).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-
-    def put(self, key: str, value: Any) -> None:
-        path = self._path(key)
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(path)
-        except OSError as exc:  # a read-only disk must not break recommendations
-            log.warning("Could not write Gemini cache entry: %s", exc)
-
-
-class GeminiClient:
-    def __init__(
-        self,
-        settings: Optional[Settings] = None,
-        client: Any = None,
-        cache: Optional[DiskCache] = None,
-        max_attempts: int = 3,
-        sleep: Callable[[float], None] = time.sleep,
-    ):
-        self.settings = settings or get_settings()
-        self._client = client
-        self.cache = cache if cache is not None else DiskCache(self.settings.cache_dir)
-        self.max_attempts = max(1, max_attempts)
-        self._sleep = sleep
-        self.stats = CallStats()
-        self._gen_model: Optional[str] = None     # first model in the chain that answered
+class GeminiClient(LLMClientBase):
+    provider = "gemini"
+    label = "Gemini"
 
     # ------------------------------------------------------------------ setup
     @property
@@ -152,38 +65,6 @@ class GeminiClient:
                 http_options=types.HttpOptions(timeout=int(self.settings.request_timeout_s * 1000)),
             )
         return self._client
-
-    # ---------------------------------------------------------------- calling
-    def _call_with_retry(self, purpose: str, fn: Callable[[], Any]) -> Any:
-        delay = 1.0
-        for attempt in range(1, self.max_attempts + 1):
-            start = time.perf_counter()
-            try:
-                result = fn()
-                self.stats.latency_ms += (time.perf_counter() - start) * 1000
-                return result
-            except GeminiUnavailable:
-                raise
-            except Exception as exc:  # the SDK raises many types; classify them
-                self.stats.latency_ms += (time.perf_counter() - start) * 1000
-                if _is_transient(exc) and attempt < self.max_attempts:
-                    log.warning("Gemini %s failed (%s); retry %d in %.0fs",
-                                purpose, _describe(exc), attempt, delay)
-                    self._sleep(delay)
-                    delay = min(delay * 2, 8.0)
-                    continue
-                raise
-        raise AssertionError("unreachable")  # pragma: no cover
-
-    def _record_failure(self, purpose: str, exc: BaseException) -> GeminiUnavailable:
-        self.stats.failures += 1
-        self.stats.last_error = _describe(exc)
-        log.warning("Gemini %s unavailable (%s); falling back", purpose, self.stats.last_error)
-        return GeminiUnavailable(self.stats.last_error)
-
-    def _count(self, purpose: str) -> None:
-        self.stats.calls += 1
-        self.stats.by_purpose[purpose] = self.stats.by_purpose.get(purpose, 0) + 1
 
     def generate_json(
         self,
