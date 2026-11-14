@@ -151,7 +151,7 @@ python -m src.main --provider nvidia "something calm for studying late at night"
 ```
 
 ```bash
-python -m src.main --provider nvidia --model nvidia/nemotron-3-ultra-550b-a55b "pump me up for the gym"
+python -m src.main --provider nvidia --model nvidia/nemotron-3-super-120b-a12b "pump me up for the gym"
 ```
 
 In the app, open **Settings** and choose **Model provider** and **Model**.
@@ -164,7 +164,9 @@ every evidence threshold: the exact bug class described under
 [the main finding](#the-main-finding-an-improved-retriever-had-silently-disabled-the-refusal-guardrail).
 So `--provider nvidia` with no Gemini key still works, using lexical retrieval, and says so in the trace.
 
-The default chain is `nvidia/nemotron-3-super-120b-a12b`, then `nvidia/nemotron-3-ultra-550b-a55b`.
+The default chain is `nvidia/nemotron-3-ultra-550b-a55b`, falling back to
+`nvidia/nemotron-3-super-120b-a12b` if Ultra is retired or overloaded. Both ids were checked
+against NVIDIA's live model catalog on 2026-11-14.
 Override it with `NVIDIA_MODELS` (comma-separated) without a code change.
 
 ### All the commands
