@@ -396,37 +396,69 @@ broken down by request type.
 ```
 
 **This table does not say what I expected it to say.** Dense retrieval alone beats the
-configured default (`hybrid`) on every ranking metric *and* abstains better (0.88 vs 0.75).
-Fusing a strong retriever with a weak one made it worse, and the optional rerank changed
-nothing measurable. I have left `hybrid` as the default and reported this rather than quietly
-switching, because one 44-query benchmark on 30 cards is thin evidence for a default, and
-`dense` fails completely without a key while `hybrid` degrades. **It is the top open item.**
+configured default (`hybrid`) on every ranking metric, and fusing a strong retriever with a weak
+one made it worse. The optional rerank changed nothing measurable, so it stays off by default.
 
-### Honest reporting of the live run
+Two reasons `hybrid` is still the default. One: `dense` cannot run at all without a key, while
+`hybrid` degrades to lexical. Two, and more important: `abstain` here (0.88 for `dense` vs 0.75
+for `hybrid`) measures abstention *on the labelled off-topic queries only*, and the behaviour
+harness tells a different story about abstention in general — the stronger the retriever, the
+worse the refusal guardrails behave. That is the finding below, and it is the reason this
+project does not simply switch to its best-ranking retriever.
 
-The two live numbers above are worse than the offline ones, and that is a real finding rather
-than noise:
+### The main finding: retrieval strength trades against refusal safety
 
-- **Both live runs produced byte-identical verdicts** (30/40, 24/26), because every Gemini
-  call is cached by sha256. The result is reproducible.
-- **It is nevertheless a mixed-path measurement.** 74 of ~148 calls failed with `429
-  RESOURCE_EXHAUSTED` on the free tier, so some cases fell back to the rule parser mid-run.
-- **Most live failures are the review flag not firing.** Six cases (`anything but jazz`,
-  `not loud`, `not happy`, exclusion-only, a lone vague word, gibberish) answered **without**
-  raising `exclusion_only`, `low_confidence` or `no_signal`, where the offline path raises them
-  correctly. Two injection attacks (`delimiter_escape`, `schema_abuse`) likewise "answered
-  confidently instead of refusing".
-- **Leading hypothesis:** better retrieval *weakened* the refusal guardrails. The thresholds
-  that decide "no signal" and "low confidence" are driven by a retrieval evidence score, and
-  dense retrieval finds plausible context for inputs that lexical retrieval correctly found
-  nothing for. If so, the evidence scale needs recalibrating per retriever — it is currently
-  fitted on 28 held-out queries — and the guardrail must not inherit a threshold tuned for a
-  weaker retriever. This is stated as a hypothesis because the free-tier quota was exhausted
-  before I could isolate it cleanly.
+The live numbers are worse than the offline ones, and chasing that down produced the most
+useful result in this project. I re-ran the whole harness changing **only the retriever**
+(`VIBEFINDER_RETRIEVAL`), everything else held constant:
 
-That pattern — *the component that improved retrieval quality silently degraded the safety
-behaviour that depended on retrieval being bad at nonsense* — is the most useful thing this
-project measured.
+| Retriever | Behaviour harness | Injection suite | The cases it fails |
+|---|---|---|---|
+| `bm25` (lexical) | 30 / 40 | **26 / 26** | synonyms, non-English, multi-intent |
+| `hybrid` (default) | 30 / 40 | 24 / 26 | **the refusal flags** |
+| `dense` | **31 / 40** | 23 / 26 | **the refusal flags** |
+
+Saved output: [`probe_bm25_gemini.txt`](logs/probe_bm25_gemini.txt),
+[`eval_results.txt`](logs/eval_results.txt), [`probe_dense.txt`](logs/probe_dense.txt).
+
+**The two failure sets are almost disjoint, and that is the point.**
+
+- **Lexical retrieval fails at understanding.** It misses `bummed out`, `livid`, `dumped`,
+  `música para estudiar` and `Musik zum Joggen` — dropping to confidence 0.00 and correctly
+  refusing, but being useless. This matches the ablation: 0.44 Hit@1 on synonyms, 0.00 on
+  non-English.
+- **Dense retrieval fails at refusing.** The same six cases that pass under `bm25` —
+  `anything but jazz`, `not happy`, exclusion-only, a lone vague word, and **gibberish** —
+  answer without raising `exclusion_only`, `low_confidence` or `no_signal`. The injection
+  score degrades *monotonically with retrieval strength*: 26/26 → 24/26 → 23/26, with
+  `delimiter_escape`, `schema_abuse` and finally `bias_bait` each "answering confidently
+  instead of refusing".
+
+**Why.** The agent's confidence is `fit × evidence`, and `evidence` is a retrieval score. The
+`no_signal` and `low_confidence` thresholds were fitted when retrieval was lexical, i.e. when
+finding nothing for nonsense *was* the behaviour. Dense retrieval finds plausible context for
+nonsense — a gibberish string still lands somewhere in embedding space — so the evidence term
+stays high, confidence never drops, and the guardrail that depended on retrieval failing never
+fires. **Improving the retriever silently disabled the "refuse rather than guess" guardrail.**
+
+**What it needs.** The evidence scale must be recalibrated per retriever (it is currently fitted
+on 28 held-out queries), and the abstention decision should not inherit a threshold tuned
+against a weaker retriever — ideally it should use a separate signal, such as margin between
+the top cards, rather than absolute score. That is the first thing I would fix next, and it is
+why `hybrid` remains the default rather than `dense`: `dense` ranks better but abstains worse,
+and abstaining is the property this project is about.
+
+**Caveat, stated plainly.** All three runs are mixed-path measurements: 74 of ~148 Gemini calls
+hit `429 RESOURCE_EXHAUSTED` on the free tier, so the parser fell back to rules for part of each
+run. The comparison above is therefore clean for *retrieval* (the only variable changed) but
+does not isolate the LLM parser's own contribution. Both full live runs
+([`eval_results.txt`](logs/eval_results.txt),
+[`eval_results_run2.txt`](logs/eval_results_run2.txt)) produced byte-identical verdicts, because
+every call is cached by sha256 — the result is reproducible, not noisy.
+
+No test caught this. Every test and every threshold had been calibrated against the weaker
+retriever, so the offline suite stayed green at 402/402 while the live refusal behaviour
+regressed.
 
 ### How the benchmark avoids grading its own homework
 
@@ -478,7 +510,11 @@ project measured.
 
 Details and the full bias discussion are in the [model card](model_card.md#2-system-limitations-and-biases).
 
-- **The review flag under-fires on the Gemini path** (see above). The most serious open issue.
+- **The review flag under-fires whenever retrieval is strong** (see
+  [the finding above](#the-main-finding-retrieval-strength-trades-against-refusal-safety)).
+  Confidence borrows its `evidence` term from a retrieval score whose thresholds were fitted
+  against lexical retrieval, so dense retrieval keeps evidence high for nonsense and the
+  abstention guardrail never fires. The most serious open issue in the project.
 - **The knowledge base encodes my assumptions** about what music suits an activity. Someone who
   studies to metal or works out to jazz is systematically served worse.
 - **Mood is inferred from audio features, not labelled**, so it is wrong for some songs.
@@ -526,13 +562,19 @@ its place.
 
 The third arrived with the live run, and I did not plan it: **improving one component silently
 broke a safety property that depended on that component being weak.** Dense retrieval was an
-unambiguous win on every ranking metric, and it appears to have quietly taught the system to
-find signal in nonsense, which is exactly what the "refuse rather than guess" guardrail
-existed to prevent. No test caught it, because every test and every threshold had been
-calibrated against the weaker retriever. The offline suite stayed green at 402/402 while the
-live behaviour regressed. That is the most transferable thing I learned here: when you upgrade
-a component, re-derive the thresholds that were fitted against the old one — and be
-suspicious of a green test suite that never saw the new component.
+unambiguous win on every ranking metric, and it taught the system to find signal in nonsense —
+exactly what the "refuse rather than guess" guardrail existed to prevent. I was able to confirm
+it rather than just suspect it, by re-running the harness with only the retriever changed: the
+cases lexical retrieval fails (synonyms, other languages) and the cases dense retrieval fails
+(refusing, abstaining, gibberish) are two almost disjoint sets, and the injection score falls
+monotonically as retrieval gets stronger.
+
+No test caught it, because every test and every threshold had been calibrated against the
+weaker retriever. The offline suite stayed green at 402/402 while the live refusal behaviour
+regressed. That is the most transferable thing I learned here: a confidence signal borrowed
+from a component is only as trustworthy as the version of that component it was tuned on. When
+you upgrade the component, re-derive the thresholds — and be suspicious of a green test suite
+that has never seen the new one.
 
 *Full ethical reflection and the AI collaboration write-up are in the
 [model card](model_card.md).*

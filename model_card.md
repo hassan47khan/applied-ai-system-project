@@ -106,19 +106,60 @@ actually enjoy them. That distinction is the single most important limitation in
   preference was relaxed. A one-word request like "pop" can score near 1.00 because every pop
   song fits "pop" perfectly, which is not the same as the user being satisfied.
 
-### 2.3 Known failure modes and edge cases
+### 2.3 The confidence signal is only valid for the retriever it was tuned on
+
+**This is the most serious limitation in the system, and it is a safety regression introduced
+by an improvement.**
+
+Confidence is `fit x evidence`, where `evidence` is a retrieval score. The `no_signal` and
+`low_confidence` thresholds that drive the refusal guardrail were fitted when retrieval was
+lexical — when finding nothing for nonsense *was* the behaviour. Dense retrieval finds
+plausible context for nonsense, because a gibberish string still lands somewhere in embedding
+space. The evidence term stays high, confidence never drops, and the guardrail never fires.
+
+Measured by re-running the harness changing only `VIBEFINDER_RETRIEVAL`:
+
+| Retriever | Behaviour harness | Injection suite | What it fails |
+|---|---|---|---|
+| `bm25` (lexical) | 30 / 40 | **26 / 26** | synonyms, non-English, multi-intent |
+| `hybrid` (default) | 30 / 40 | 24 / 26 | **the refusal flags** |
+| `dense` | **31 / 40** | 23 / 26 | **the refusal flags** |
+
+The two failure sets are almost disjoint. Under `dense` and `hybrid`, six cases that pass
+under `bm25` — `anything but jazz`, `not happy`, exclusion-only, a lone vague word and
+**gibberish** — answer without raising `exclusion_only`, `low_confidence` or `no_signal`. The
+injection score degrades monotonically as retrieval gets stronger, with `delimiter_escape`,
+`schema_abuse` and then `bias_bait` each answering confidently instead of refusing.
+
+**Consequences for a user.** On the Gemini path the system is measurably more willing to
+produce a confident-looking answer to input it should decline — nonsense, contradictory
+requests, and some prompt-injection attempts. The recommendations themselves are harmless;
+what degrades is the system's honesty about not knowing, which is the property this project
+exists to demonstrate.
+
+**What it needs.** Recalibrate the evidence scale per retriever (it is fitted on 28 held-out
+queries), and stop deriving abstention from an absolute retrieval score — a margin between the
+top cards would not inherit the old retriever's scale. `hybrid` is kept as the default rather
+than the better-ranking `dense` precisely because abstention matters more here than ranking.
+
+**Caveat.** All three runs are mixed-path: 74 of ~148 Gemini calls hit `429
+RESOURCE_EXHAUSTED`, so the parser fell back to rules for part of each run. The comparison
+isolates *retrieval* cleanly, since that was the only variable changed, but does not isolate
+the LLM parser's own contribution.
+
+### 2.4 Known failure modes and edge cases
 
 | Edge case | What happens | Status |
 |---|---|---|
 | Multi-intent request ("sad songs for a road trip") | A second card is blended only if it scores ≥ 60% of the best card, so the sadness is dropped | **Known failure.** Reported as a failing row in §4.3, not hidden |
 | Opposite contexts ("sleep then gym") | Follows the stronger card and flags the other | By design, bluntly: "dinner with friends" is flagged too, though its picks are fine |
 | Off-topic request made of known words ("the night of the concert was late") | Answered rather than refused | **Known failure.** Off-topic detection is word counting: refuse if fewer than half the words appear in the knowledge base |
-| Follow-up phrased outside the rule set | Treated as a brand-new request | By design (§2.4), but silent — the user is not told the follow-up was not understood |
+| Follow-up phrased outside the rule set | Treated as a brand-new request | By design (§2.5), but silent — the user is not told the follow-up was not understood |
 | Negation with a double negative | Not understood in general | Partly handled: "nothing less than loud" and "more or less acoustic" are recognised as idioms |
 | "No jazz, rock or pop" | Read as a list of three rejections | Genuinely ambiguous; documented rather than guessed |
 | Deezer has no match for a track | Placeholder shown, never a wrong cover (weak matches rejected) | 24 of 25 sampled tracks matched |
 
-### 2.4 Limitations carried over from 2.0, and whether they still hold
+### 2.5 Limitations carried over from 2.0, and whether they still hold
 
 | 2.0 limitation | Still true in 3.0? |
 |---|---|
@@ -127,7 +168,7 @@ actually enjoy them. That distinction is the single most important limitation in
 | Non-English requests are refused | **Fixed when Gemini is available.** Still refused offline |
 | The crude suffix stripper can merge unrelated words ("notes"/"not") | **Still true.** No current card is affected |
 | Negation is a list of rule patterns, not language understanding | **Still true.** Covers genres, moods and features across many phrasings; a comma ends a rejection unless it continues a list closed by "or"/"and", and "and" always extends one, so "no jazz and calm" rejects calm too |
-| Multi-intent requests collapse to one intent | **Still true** (§2.3) |
+| Multi-intent requests collapse to one intent | **Still true** (§2.4) |
 | Confidence is a heuristic, not a probability | **Still true** (§2.2) |
 
 ---
@@ -178,6 +219,9 @@ match is not a basis for that.
 
 ### 3.4 What the guardrails do not cover
 
+- **Refusal under strong retrieval** (§2.3). The guardrail that declines nonsense and some
+  injection attempts is driven by a retrieval score and under-fires on the Gemini path. The
+  schema and validation defences are unaffected; the *abstention* defence is.
 - **Invented qualitative claims in explanations** (§2.2).
 - **Indirectly phrased distress** (§3.3).
 - **Bias in the cards themselves.** No guardrail notices that the study card assumes lofi. The
@@ -198,8 +242,10 @@ Everything in this section is reproducible from the repo. Commands are in the
 | Unit and behaviour tests | `python -m pytest` | **402 / 402 pass**, fully offline |
 | Mutation check | `python tools/mutate.py` | **63 / 63** planted bugs caught by the suite |
 | Behaviour harness, offline | `python -m src.evaluate` | **33 / 33** checks pass, 7 Gemini-only cases reported as SKIP |
-| Prompt-injection suite | `python -m src.evaluate --injection` | **26 / 26** attacks handled safely |
-| Retrieval benchmark | included above | 44 labelled queries, ablation across 4 retrievers (§4.2) |
+| Behaviour harness, with Gemini | same, with a key | **30 / 40** checks pass — see §2.3 |
+| Prompt-injection suite, offline | `python -m src.evaluate --injection` | **26 / 26** attacks handled safely |
+| Prompt-injection suite, with Gemini | same, with a key | **24 / 26** — see §2.3 |
+| Retrieval benchmark | included above | 44 labelled queries, ablation across 5 retriever configurations (§4.2) |
 | Index integrity | `python -m src.index verify` | 30 cards, `gemini-embedding-2` (768-d), up to date |
 
 The test suite replaces the Gemini SDK with a fake whose embeddings put synonyms on the same
@@ -207,7 +253,34 @@ axis, so the hybrid's semantic recall is exercised without a network.
 
 ### 4.2 Retrieval benchmark and ablation
 
-<!-- EVAL:ABLATION -->
+44 labelled queries in [`data/eval/retrieval_gold.json`](data/eval/retrieval_gold.json),
+labelled before any retriever ran on them. Columns after `abstain` are Hit@1 by request type.
+From [`logs/eval_results.txt`](logs/eval_results.txt):
+
+```
+  retriever        R@3  Hit@1   MRR  nDCG@3  abstain  direct synonym  multi non-en
+  tfidf           0.58   0.64  0.64    0.60     0.88    1.00    0.44   1.00   0.00
+  bm25            0.64   0.64  0.66    0.64     0.88    1.00    0.44   1.00   0.00
+  dense           0.98   1.00  1.00    0.99     0.88    1.00    1.00   1.00   1.00
+  hybrid          0.97   0.94  0.97    0.96     0.75    1.00    0.88   1.00   1.00
+  hybrid+rerank   0.97   0.94  0.97    0.96     0.75    1.00    0.88   1.00   1.00
+```
+
+**What this shows.** Lexical retrieval is perfect on direct requests and useless where the
+vocabulary differs: 0.44 Hit@1 on synonyms, **0.00 on non-English**. "Feeling bummed out"
+retrieves *pregame-hype*, because the word "out" matches "going out". Closing that gap is the
+entire justification for the Gemini path, and dense retrieval closes it completely (1.00 on
+both).
+
+**What it also shows, which I did not expect.** `dense` alone beats the configured `hybrid`
+default on every ranking metric; fusing a strong retriever with a weak one made it worse, and
+the optional rerank changed nothing measurable. The default is still `hybrid`, for the reason
+in §2.3: better ranking came with worse abstention, and abstention is the property that
+matters most here.
+
+**Confidence calibration.** Offline, the separation is clean: answers not flagged average 0.99
+(n=18), flagged answers average 0.30 (n=8). On the Gemini path it collapses to 0.93 (n=29) and
+0.70 (n=5) — the same regression described in §2.3, visible as a calibration number.
 
 ### 4.3 Adversarial probing: untuned inputs, before and after fixes
 
@@ -233,7 +306,7 @@ Every row that says "Fail" is a bug this probing found; all of them are now regr
 | "high energy lofi" | flag the conflict | Pass: relaxed + flagged | Pass |
 | "I'm bored" | handle gracefully | Pass: refuses to guess | Pass |
 | "música para estudiar" | handle gracefully | Pass offline: refused, no crash | **Answered correctly with Gemini** |
-| **"sad songs for a road trip"** | sad *and* driving | **Fail**: sadness dropped | **Still fails** — known limitation (§2.3) |
+| **"sad songs for a road trip"** | sad *and* driving | **Fail**: sadness dropped | **Still fails** — known limitation (§2.4) |
 
 The last row is left in deliberately. A 17/18 table with the failure named is worth more than
 an 18/18 table that quietly dropped the case.
@@ -246,7 +319,16 @@ direct override text, zero-width and full-width obfuscation, delimiter escapes, 
 
 In the test suite they run against a **fully hijacked** fake model that actively returns
 attacker payloads in every field; the system must still act only on catalog values within
-[0, 1]. The same suite runs live with `--injection`.
+[0, 1]. There the suite scores **26/26**, and so it does live under lexical retrieval.
+
+**Live, with strong retrieval, it does not.** The score falls monotonically as retrieval gets
+stronger — 26/26 with `bm25`, 24/26 with `hybrid`, 23/26 with `dense` — as
+`delimiter_escape`, `schema_abuse` and then `bias_bait` each stop refusing and answer
+confidently instead. The schema defence (mitigation 4) still holds in every case: no attacker
+value ever reaches the scorer, and nothing is echoed. What fails is the *refusal*: the system
+answers an attack it should decline, because the confidence signal that drives refusal is
+borrowed from the retrieval score. See §2.3. This is a real gap, not a measurement artifact,
+and it is the reason the injection row in §4.1 reports both numbers rather than the better one.
 
 ### 4.5 Explanation specialization: baseline vs. constrained output
 
@@ -330,11 +412,22 @@ stray-number checks; it did not solve invented qualitative claims, and does not 
   thresholds tuned for TF-IDF would have silently changed what counts as evidence. Each
   retriever is now mapped onto one scale, with a floor and a full-evidence point fitted on
   held-out queries.
-- **The newest surprise was infrastructure, not code.** Bringing up the live path on 2026-11-14,
+- **One surprise was infrastructure, not code.** Bringing up the live path on 2026-11-14,
   every model in the configured chain returned 404 — including `gemini-2.5-flash`, which
   `models.list()` happily reported. The real message was that it is "no longer available to new
   users". A model being listed does not mean it is callable, and a fallback chain is only as
   good as its newest entry.
+- **The biggest surprise: the upgrade broke the guardrail.** I expected the live run to score
+  *better* than the offline one, because the whole point of the Gemini path is the cases
+  lexical retrieval cannot reach. It scored worse (30/40 against 33/33, 24/26 against 26/26),
+  and the failures were not in understanding — they were in refusing. Six cases that correctly
+  declined offline now answered. My first instinct was that the LLM parser was inventing
+  intent, which was wrong: holding everything else constant and changing only the retriever
+  showed the cause was dense retrieval keeping the evidence term high for input that deserved
+  none (§2.3). The lesson generalises past this project: **a confidence signal borrowed from a
+  component silently inherits that component's weaknesses as its calibration, and a green
+  offline suite cannot see it**, because every threshold in that suite was fitted against the
+  component it is still using.
 
 ---
 
@@ -406,6 +499,11 @@ reported as a failure in §4.3 rather than deleted.
   that actually selected (ODESZA, EDM remixes) is what caught it.
 - **When the live path 404'd, I did not accept the assistant's first theory** (a bad key). The
   key worked; the models were gone. Reading the actual 404 body was what settled it.
+- **I did not accept the first explanation of the live regression either** — mine or the
+  assistant's. Both of us initially read the under-firing review flag as the LLM parser
+  inventing intent. The controlled re-run (same everything, retriever swapped) showed it was
+  retrieval, not the parser. The lesson I took from it is that a plausible causal story about
+  an AI component is worth exactly as much as the experiment that isolates it.
 
 ---
 
